@@ -3,7 +3,7 @@
 File::File(const char* pathname) {
 
 
-    fd_ = open(pathname, O_RDONLY);
+    fd_ = open(pathname, O_RDWR | O_CREAT);
 
     if (fd_ < 0) {
         throw std::system_error(errno, std::system_category(), "failed at opening file");
@@ -23,14 +23,14 @@ File::File(const char* pathname) {
 
 File::File(const char pathname[], int fileSize) {
 
-    fd_ = open(pathname, O_RDONLY);
+    fd_ = open(pathname, O_RDWR | O_CREAT);
     if (fd_ < 0) {
         throw std::system_error(errno, std::system_category(), "failed at opening file");
     }
 
     lockf(fd_, F_LOCK, 0);
 
-    int ftruncate_result = ftruncate(fd_, fileSize);
+    int ftruncate_result = ftruncate(fd_, (off_t)fileSize);
 
     if (ftruncate_result < 0) {
         throw std::system_error(errno, std::system_category(), "failure with ftruncate.");

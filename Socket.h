@@ -9,16 +9,19 @@
 
 class Socket {
 private:
-    int fd_;
+
     sockaddr_in remote_address_;
+    sockaddr_in my_address_;
 
 public:
     Socket(const sockaddr_in& address);
     ~Socket();
 
-    int send_to(const void* map_pointer, unsigned int map_length, const sockaddr_in& address);
-    int recieve_from(void* map_pointer, unsigned int map_length, sockaddr_in& address);
-    int recieve_message(Message& message, sockaddr_in& address);
+    int fd_;
+
+    int send_to(const void* map_pointer, size_t map_length, const sockaddr_in& address);
+    int recieve_from(void* map_pointer, size_t map_length);
+    Message recieve_message();
     void printMessage(Message& message);
 
 };

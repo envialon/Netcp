@@ -20,6 +20,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
         messageToSend = input.GetMapInfo(filename);
         sendSocket.send_to(&messageToSend, sizeof(messageToSend), remoteSocket);
 
+        std::cout << "here\n";
         // enviamos el archivo mapeado
         char* aux_pointer = (char*)input.GetMapPointer();
         int aux_length = input.GetMapLength();
@@ -28,7 +29,8 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
             sendSocket.send_to(aux_pointer, aux_length, remoteSocket);
         }
         else {
-            while (aint & calledThreadux_pointer <= (input.GetMapPointer() + input.GetMapLength())) {
+            char* whileThreshold = (char*)(input.GetMapPointer()) + (input.GetMapLength());
+            while (aux_pointer <= whileThreshold) {
                 aux_length =
                     sendSocket.send_to(aux_pointer, MAX_PACKAGE_SIZE, remoteSocket);
                 aux_pointer += aux_length;
@@ -41,32 +43,31 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
 }
 
 void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& pause, std::atomic_bool& abortRecieve) {
-    try {
-        sockaddr_in recieveSocketAdress(make_ip_address(6660, "127.0.0.1"));
-        Socket recieveSocket(recieveSocketAdress);
-        Message messageToRecieve{};
+
+    sockaddr_in recieveSocketAdress(make_ip_address(6660, "127.0.0.1"));
+    Socket recieveSocket(recieveSocketAdress);
+    Message messageToRecieve{};
 
 
-        int mkdir_result = mkdir(pathname.c_str(), 0);
-        if (mkdir_result < 0) {
-            throw std::system_error(errno, std::system_category(), "mkdir failed");
-        }
+    // int mkdir_result = mkdir(pathname.c_str(), S_IRWXU);
 
-        recieveSocket.recieve_message(messageToRecieve, recieveSocketAdress);
-        File output(&messageToRecieve.text[0], messageToRecieve.file_size);
+    // if (mkdir_result < 0) {
+    //     throw std::system_error(errno, std::system_category(), "mkdir failed");
+    // }
+    recieveSocket.recieve_from(&messageToRecieve, sizeof(messageToRecieve), recieveSocketAdress);
+    File output(&messageToRecieve.text[0], messageToRecieve.file_size);
 
-        char* auxptr = (char*)output.GetMapPointer();
-        const char* outputThreshold = (char*)(output.GetMapPointer() + output.GetMapLength());
-        //wait for all the packages and store them in the mapped file.
-        while (auxptr < outputThreshold) {
-            auxptr += recieveSocket.recieve_from(auxptr, output.GetMapLength(), recieveSocketAdress);
-        }
 
-        output.WriteMappedFile();
+    char* auxptr = (char*)output.GetMapPointer();
+    const char* outputThreshold = (char*)(output.GetMapPointer()) + (output.GetMapLength());
+    //wait for all the packages and store them in the mapped file.
+    while (auxptr < outputThreshold) {
+        auxptr += recieveSocket.recieve_from((void*)auxptr, output.GetMapLength(), recieveSocketAdress);
     }
-    catch (...) {
-        eptr = std::current_exception();
-    }
+
+    output.WriteMappedFile();
+
+
 }
 
 void askForInput() {
@@ -74,10 +75,9 @@ void askForInput() {
     std::atomic_bool exit, pause, abortSend, abortRecieve;
     std::string userInput, pathname, filename;
 
-    std::vector<std::thread> vecOfThreads;
-
+    std::vector<std::thread>vecOfThreads;
     try {
-        while (exit) {
+        while (!exit) {
             std::cout << "introduce a command:";
             std::getline(std::cin, userInput);
 
@@ -112,6 +112,7 @@ void askForInput() {
                 else {
                     std::exception_ptr eptr{};
                     std::thread sendThread(&NetcpSend, std::ref(eptr), std::ref(filename));
+                    vecOfThreads.push_back(std::move(sendThread));
                     sendThread.join();
                     if (eptr) {
                         std::rethrow_exception(eptr);
@@ -126,26 +127,28 @@ void askForInput() {
                 else {
                     std::exception_ptr eptr{};
                     std::thread recieveThread(&NetcpRecieve, std::ref(eptr), std::ref(pathname), std::ref(pause), std::ref(abortRecieve));
+                    recieveThread.detach();
+                    vecOfThreads.push_back(std::move(recieveThread));
+
                     // recieveThread.join();
                     // if (eptr) {
-                    //      std::rethrow_exception(eptr);
+                    //     std::rethrow_exception(eptr);
                     // }
                 }
+            }
+
+            for (long unsigned int i = 0; i < vecOfThreads.size(); i++) {
+                vecOfThreads[i].join();
             }
         }
     }
     catch (std::system_error& e) {
         std::cerr << e.what() << "\n";
     }
-}
-
-int protected_main() {
-
-
-    askForInput();
 
 }
 
 int main() {
-    return protected_main();
+    askForInput();
+    return 0;
 }

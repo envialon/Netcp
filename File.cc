@@ -2,8 +2,7 @@
 
 File::File(const char* pathname) {
 
-
-    fd_ = open(pathname, O_RDWR | O_CREAT);
+    fd_ = open(pathname, O_RDWR);
 
     if (fd_ < 0) {
         throw std::system_error(errno, std::system_category(), "failed at opening file");
@@ -23,12 +22,11 @@ File::File(const char* pathname) {
 
 File::File(const char pathname[], int fileSize) {
 
-    fd_ = open(pathname, O_RDWR | O_CREAT);
+    fd_ = open(pathname, O_CREAT | O_RDWR | S_IRWXU, 0666);
     if (fd_ < 0) {
         throw std::system_error(errno, std::system_category(), "failed at opening file");
     }
 
-    lockf(fd_, F_LOCK, 0);
 
     int ftruncate_result = ftruncate(fd_, (off_t)fileSize);
 
@@ -36,7 +34,7 @@ File::File(const char pathname[], int fileSize) {
         throw std::system_error(errno, std::system_category(), "failure with ftruncate.");
     }
 
-    map_length_ = lseek(fd_, 0, SEEK_END);
+    map_length_ = fileSize;
 
     map_pointer_ = mmap(NULL, map_length_, PROT_READ, MAP_SHARED, fd_, 0);
 
@@ -45,6 +43,7 @@ File::File(const char pathname[], int fileSize) {
     }
 
 
+    // lockf(fd_, F_LOCK, 0);
 
 }
 

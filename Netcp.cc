@@ -24,12 +24,17 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
         char* aux_pointer = (char*)input.GetMapPointer();
 
         char* whileThreshold = (char*)(input.GetMapPointer()) + (input.GetMapLength());
+        std::cout << "send1\n";
         while (aux_pointer <= whileThreshold) {
+            sleep(10);
+            std::cout << "send2\n";
             sendSocket.send_to(aux_pointer, (size_t)MAX_PACKAGE_SIZE, remoteSocket);
             aux_pointer += MAX_PACKAGE_SIZE;
         }
     }
-
+    catch (std::system_error& e) {
+        std::cerr << e.what() << "\n";
+    }
     catch (...) {
         eptr = std::current_exception();
     }

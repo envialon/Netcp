@@ -14,7 +14,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
         File input(filename.c_str());
         Message messageToSend{};
         messageToSend.text[1023] = '\0';
-        sockaddr_in remoteSocket = make_ip_address(6660, "127.0.0.1");
+        const sockaddr_in remoteSocket = make_ip_address(6660, "127.0.0.1");
 
         // enviamos la información previa al archivo mapeado
         messageToSend = input.GetMapInfo("output.txt");
@@ -26,8 +26,9 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
         char* whileThreshold = (char*)(input.GetMapPointer()) + (input.GetMapLength());
         std::cout << "send1\n";
         while (aux_pointer <= whileThreshold) {
-            sleep(10);
+            sleep(5);
             std::cout << "send2\n";
+            //problem is here, have to calculate the exact number for the sendto size.
             sendSocket.send_to(aux_pointer, (size_t)MAX_PACKAGE_SIZE, remoteSocket);
             aux_pointer += MAX_PACKAGE_SIZE;
         }

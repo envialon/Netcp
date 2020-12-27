@@ -28,6 +28,8 @@ File::File(const char pathname[], int fileSize) {
     }
 
 
+    lockf(fd_, F_LOCK, 0);
+
     int ftruncate_result = ftruncate(fd_, (off_t)fileSize);
 
     if (ftruncate_result < 0) {
@@ -43,7 +45,6 @@ File::File(const char pathname[], int fileSize) {
     }
 
 
-    // lockf(fd_, F_LOCK, 0);
 
 }
 

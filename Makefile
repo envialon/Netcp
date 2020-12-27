@@ -1,7 +1,5 @@
 
 NetCp:Netcp.cc Socket.o File.o
-	rmdir out
-	rm output.txt
 	g++ -std=c++14 -g -Wall -o Netcp Netcp.cc File.o Socket.o -pthread
 
 Socket.o: Socket.cc

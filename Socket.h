@@ -11,13 +11,14 @@ class Socket {
 private:
 
     sockaddr_in remote_address_;
-    sockaddr_in my_address_;
+
 
 public:
     Socket(const sockaddr_in& address);
     ~Socket();
 
     int fd_;
+    sockaddr_in my_address_;
 
     int send_to(const void* map_pointer, size_t map_length, const sockaddr_in& address);
     int recieve_from(void* map_pointer, size_t map_length);

@@ -20,18 +20,41 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
         messageToSend = input.GetMapInfo("output.txt");
         sendSocket.send_to(&messageToSend, sizeof(messageToSend), remoteSocket);
 
-        // enviamos el archivo mapeado
-        char* aux_pointer = (char*)input.GetMapPointer();
 
-        char* whileThreshold = (char*)(input.GetMapPointer()) + (input.GetMapLength());
         std::cout << "send1\n";
-        while (aux_pointer <= whileThreshold) {
-            sleep(5);
+
+        char* aux_pointer = (char*)input.GetMapPointer();
+        if (input.GetMapLength() < MAX_PACKAGE_SIZE) {
             std::cout << "send2\n";
-            //problem is here, have to calculate the exact number for the sendto size.
-            sendSocket.send_to(aux_pointer, (size_t)MAX_PACKAGE_SIZE, remoteSocket);
-            aux_pointer += MAX_PACKAGE_SIZE;
+            sendSocket.send_to(aux_pointer, input.GetMapLength(), remoteSocket);
         }
+        else {
+            int numberOfLoops = input.GetMapLength() / MAX_PACKAGE_SIZE;
+            int aux_length = input.GetMapLength();
+
+            //fix for last package, should be smaller than 60k
+            for (int i = 0; i <= numberOfLoops; ++i) {
+
+                if (aux_length < MAX_PACKAGE_SIZE) {
+                    std::cout << "send3\n";
+                    sendSocket.send_to(aux_pointer, aux_length, remoteSocket);
+                }
+                else if (aux_length < 0) {
+                    std::cout << "send4\n";
+                    aux_length -= sendSocket.send_to(aux_pointer, MAX_PACKAGE_SIZE, remoteSocket);
+                    aux_pointer += MAX_PACKAGE_SIZE;
+                }
+            }
+        }
+
+
+        // while (aux_pointer <= whileThreshold) {
+        //     sleep(5);
+        //     std::cout << "send2\n";
+        //     //problem is here, have to calculate the exact number for the sendto size.
+        //     sendSocket.send_to(aux_pointer, (size_t)MAX_PACKAGE_SIZE, remoteSocket);
+        //     aux_pointer += MAX_PACKAGE_SIZE;
+        // }
     }
     catch (std::system_error& e) {
         std::cerr << e.what() << "\n";
@@ -62,14 +85,35 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         std::cout << "2\n";
         // read the content of the file in the mapped memory of the file 
         char* aux_ptr = (char*)output.GetMapPointer();
-        const char* outputThreshold = (char*)(output.GetMapPointer()) + (output.GetMapLength());
+        std::cout << aux_ptr << "\n";
+        // const char* outputThreshold = (char*)(output.GetMapPointer()) + (output.GetMapLength());
         std::cout << "3\n";
+
         //wait for all the packages and store them in the mapped file.
-        while (aux_ptr < outputThreshold) {
-            std::cout << "4\n";
-            recieveSocket.recieve_from((void*)aux_ptr, MAX_PACKAGE_SIZE);
-            aux_ptr += MAX_PACKAGE_SIZE;
+
+        int numberOfLoops = messageToRecieve.file_size / MAX_PACKAGE_SIZE;
+        int aux_length = output.GetMapLength();
+
+        //fix for last package, should be smaller than 60k
+        for (int i = 0; i <= numberOfLoops; ++i) {
+            if (aux_length < MAX_PACKAGE_SIZE) {
+                std::cout << "4 \t" << aux_length << "\t" << output.GetMapPointer() << "\n";
+                recieveSocket.recieve_from(&aux_ptr, aux_length);
+                //  socklen_t addr_len = sizeof(recieveSocket.my_address_);
+                // recvfrom(recieveSocket.fd_, (void*)aux_ptr, (size_t)aux_length, 0, reinterpret_cast<sockaddr*>(&recieveSocket.my_address_), &addr_len);
+            }
+            else if (aux_length < 0) {
+                std::cout << "5\n";
+                aux_length -= recieveSocket.recieve_from(aux_ptr, MAX_PACKAGE_SIZE);
+                aux_ptr += MAX_PACKAGE_SIZE;
+            }
         }
+
+        // while (aux_ptr < outputThreshold) {
+        //     std::cout << "4\n";
+        //     recieveSocket.recieve_from((void*)aux_ptr, MAX_PACKAGE_SIZE);
+        //     aux_ptr += MAX_PACKAGE_SIZE;
+        // }
 
         output.WriteMappedFile();
     }

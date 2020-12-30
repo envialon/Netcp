@@ -28,7 +28,7 @@ File::File(const char pathname[], int fileSize) {
     }
 
 
-    lockf(fd_, F_LOCK, 0);
+    //lockf(fd_, F_LOCK, 0);
 
     int ftruncate_result = ftruncate(fd_, (off_t)fileSize);
 
@@ -38,7 +38,7 @@ File::File(const char pathname[], int fileSize) {
 
     map_length_ = fileSize;
 
-    map_pointer_ = mmap(NULL, map_length_, PROT_READ, MAP_SHARED, fd_, 0);
+    map_pointer_ = mmap(NULL, map_length_, PROT_WRITE, MAP_SHARED, fd_, 0);
 
     if (map_pointer_ == MAP_FAILED) {
         throw std::system_error(errno, std::system_category(), "failure at mapping the file.");

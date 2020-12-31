@@ -11,16 +11,20 @@
 void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
     try {
         Socket sendSocket(make_ip_address(0, "127.0.0.1"));
-        File input(filename.c_str());
-        Message messageToSend{};
-        messageToSend.text[1023] = '\0';
         sockaddr_in remoteSocket = make_ip_address(6660, "127.0.0.1");
 
-        // enviamos la información previa al archivo mapeado
+        File input(filename.c_str());
+
+        Message messageToSend{};
+        messageToSend.text[1023] = '\0';
+
+        //Send a message containing the info of the file 
         messageToSend = input.GetMapInfo("output.txt");
         sendSocket.send_to(&messageToSend, sizeof(messageToSend), remoteSocket);
 
-
+        // Send the contents of the file.
+        // I think  the first if its optional, if done correctly,
+        // the loop should iterate at least once even if numberOfLoops == 0
         char* aux_pointer = (char*)input.GetMapPointer();
         if (input.GetMapLength() < MAX_PACKAGE_SIZE) {
             sendSocket.send_to(aux_pointer, input.GetMapLength(), remoteSocket);
@@ -29,7 +33,6 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename) {
             int numberOfLoops = input.GetMapLength() / MAX_PACKAGE_SIZE;
             int aux_length = input.GetMapLength();
 
-            //fix for last package, should be smaller than 60k
             for (int i = 0; i <= numberOfLoops; ++i) {
                 if (aux_length < MAX_PACKAGE_SIZE) {
                     sendSocket.send_to(aux_pointer, aux_length, remoteSocket);
@@ -61,22 +64,17 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             throw std::system_error(errno, std::system_category(), "mkdir failed");
         }
 
-        // Get first message, with the necessary information needed to create the file.
+        // Save the file information 
         Message messageToRecieve = recieveSocket.recieve_message();
 
-        // Create and map the file in memory
         std::string fullPathname = (std::string(messageToRecieve.text.data()));
         File output(&fullPathname.c_str()[0], messageToRecieve.file_size);
 
-        // read the content of the file in the mapped memory of the file 
-        char* aux_ptr = (char*)output.GetMapPointer();
-
-        //wait for all the packages and store them in the mapped file.
-
+        // Save the file contents 
         int numberOfLoops = messageToRecieve.file_size / MAX_PACKAGE_SIZE;
+        char* aux_ptr = (char*)output.GetMapPointer();
         int aux_length = output.GetMapLength();
 
-        //fix for last package, should be smaller than 60k
         for (int i = 0; i <= numberOfLoops; ++i) {
             if (aux_length < MAX_PACKAGE_SIZE) {
                 aux_length = recieveSocket.recieve_from(aux_ptr, aux_length);

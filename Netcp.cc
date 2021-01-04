@@ -58,6 +58,9 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         }
 
     }
+    catch (std::system_error& e) {
+        std::cerr << e.what() << "\n";
+    }
     catch (...) {
         eptr = std::current_exception();
     }
@@ -112,7 +115,7 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             if (abortRecieve) {
                 return;
             }
-
+            //Location of error, check conditions of ifs do not change aux_length
             for (int i = 0; i <= numberOfLoops; ++i) {
                 if (abortRecieve) {
                     return;
@@ -127,6 +130,9 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             }
         }
         return;
+    }
+    catch (std::system_error& e) {
+        std::cerr << e.what() << "\n";
     }
     catch (...) {
         eptr = std::current_exception();
@@ -182,7 +188,10 @@ void askForInput() {
                     std::cout << "\nincomplete instruction: send [FilenameToSend]\n";
                 }
                 else {
+
+
                     sendThread = std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend));
+
                 }
             }
             else if (userInput == "recieve") {
@@ -192,7 +201,10 @@ void askForInput() {
                     std::cout << "\nincomplete instruction: recieve [PathnameToSaveFile]\n";
                 }
                 else {
-                    recieveThread = std::thread(&NetcpRecieve, std::ref(eptr), std::ref(pathname), std::ref(abortRecieve));
+                    //check if thread exists already
+                    if (recieveThread.get_id() == std::thread::id()) {
+                        recieveThread = std::thread(&NetcpRecieve, std::ref(eptr), std::ref(pathname), std::ref(abortRecieve));
+                    }
                 }
             }
             else if (userInput == "help") {

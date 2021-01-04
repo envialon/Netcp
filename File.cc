@@ -17,7 +17,6 @@ File::File(const char* pathname) {
         throw std::system_error(errno, std::system_category(), "failure at mapping the file.");
     }
 
-
 }
 
 File::File(const char pathname[], int fileSize) {
@@ -27,8 +26,7 @@ File::File(const char pathname[], int fileSize) {
         throw std::system_error(errno, std::system_category(), "failed at opening file");
     }
 
-
-    //lockf(fd_, F_LOCK, 0);
+    lockf(fd_, F_LOCK, 0);
 
     int ftruncate_result = ftruncate(fd_, (off_t)fileSize);
 
@@ -43,9 +41,6 @@ File::File(const char pathname[], int fileSize) {
     if (map_pointer_ == MAP_FAILED) {
         throw std::system_error(errno, std::system_category(), "failure at mapping the file.");
     }
-
-
-
 }
 
 File::~File() {

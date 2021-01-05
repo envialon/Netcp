@@ -1,6 +1,7 @@
 #include <exception>
 #include <thread>
 #include <vector>
+#include <stack>
 #include <atomic>
 #include <signal.h>
 #include <sstream>
@@ -23,6 +24,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         if (abortSend) {
             return;
         }
+
         //Send a message containing the info of the file 
         messageToSend = input.GetMapInfo("output.txt");
         sendSocket.send_to(&messageToSend, sizeof(messageToSend), remoteSocket);
@@ -110,9 +112,6 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             char* aux_ptr = (char*)output.GetMapPointer();
             int aux_length = output.GetMapLength();
 
-
-            std::cout << "receive nOfLoops:" << numberOfLoops << "\n";
-
             if (abortReceive) {
                 return;
             }
@@ -134,7 +133,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
     }
     catch (std::system_error& e) {
         if (e.code().value() == EINTR) {
-            std::cout << "\nNetcpReceive aborted.";
+            std::cout << "\tNetcpReceive aborted.\n";
         }
         else {
             std::cerr << e.what() << "\n";
@@ -148,17 +147,17 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
 
 static void SignalHandler(int sig, siginfo_t* siginfo, void* context) {
-    std::cout << "\nSignal handler called\n";
+    std::cout << "\n\tSignal handler called\n";
     return;
 }
 
 void askForInput(std::exception_ptr& eptr) {
 
     std::atomic_bool exit, pause, abortSend, abortReceive;
-    abortSend = true; abortReceive = true;
+
+    exit = false; abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
-    std::thread receiveThread;
-    std::vector<std::thread> vecOfThreads;
+    std::stack<std::thread> sendStack, receiveStack;
 
     struct sigaction act = {};
     act.sa_flags = 0;
@@ -167,7 +166,7 @@ void askForInput(std::exception_ptr& eptr) {
 
     try {
 
-        std::cout << "introduce a command:";
+        std::cout << "Introduce a command:";
         while (!exit) {
             std::getline(std::cin, userInput);
 
@@ -191,25 +190,44 @@ void askForInput(std::exception_ptr& eptr) {
                 sstream >> userInput;
 
                 if (userInput == "receive") {
-                    abortReceive = true;
-                    pthread_kill(receiveThread.native_handle(), SIGUSR1);
+                    if (!receiveStack.empty()) {
+                        abortReceive = true;
+                        pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
 
+                        if (receiveStack.top().joinable()) {
+                            receiveStack.top().join();
+                            receiveStack.pop();
+                        }
+                    }
+                    else {
+                        std::cout << "\n\tYou can't abort something that doesn't exist...\n";
+                    }
                 }
                 else {
-                    pause = false;
-                    abortSend = true;
+                    if (!sendStack.empty()) {
+                        pause = false;
+                        abortSend = true;
+                        if (sendStack.top().joinable()) {
+                            sendStack.top().join();
+                            sendStack.pop();
+                        }
+                    }
+                    else {
+                        std::cout << "\n\tYou can't abort something that doesn't exist...\n";
+                    }
                 }
+
             }
             else if (userInput == "send") {
                 sstream >> filename;
                 if (filename.empty()) {
-                    std::cout << "\nincomplete instruction: send [FilenameToSend]\n";
+                    std::cout << "\n\tIncomplete instruction: send [FilenameToSend]\n";
                 }
                 else {
 
                     if (abortSend) {
                         abortSend = false;
-                        vecOfThreads.push_back(std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend)));
+                        sendStack.push(std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend)));
                     }
                     else {
                         std::cout << "\nWait for the current file to be sent.\n";
@@ -220,16 +238,16 @@ void askForInput(std::exception_ptr& eptr) {
                 sstream >> pathname;
                 pathname = "./out/";
                 if (pathname.empty()) {
-                    std::cout << "\nincomplete instruction: receive [PathnameToSaveFile]\n";
+                    std::cout << "\n\tIncomplete instruction: receive [PathnameToSaveFile]\n";
                 }
                 else {
                     //check if thread exists already
-                    if (abortReceive) {
+                    if (receiveStack.empty()) {
                         abortReceive = false;
-                        receiveThread = std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive));
+                        receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive)));
                     }
                     else {
-                        std::cout << "\nYou're already receiving \n";
+                        std::cout << "\nYou're already receiving dummy dumb\n";
                     }
                 }
             }
@@ -237,22 +255,28 @@ void askForInput(std::exception_ptr& eptr) {
                 std::cout << "\nPlaceholder for help message.\n\n";
             }
             else {
-                std::cout << "\nUnknown instruction\nintroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
+                std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
             }
-            std::cout << "introduce a command:";
+            std::cout << "Introduce a command:";
         }
 
         abortReceive = true;
-        pthread_kill(receiveThread.native_handle(), SIGUSR1);
+        abortSend = true;
 
-        sleep(1);
+        for (int i = 0; i < (int)receiveStack.size(); i++) {
 
-        if (receiveThread.joinable()) {
-            receiveThread.join();
+            pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
+            sleep(1);
+            if (receiveStack.top().joinable()) {
+                receiveStack.top().join();
+                receiveStack.pop();
+            }
         }
-        for (int i = 0; i < (int)vecOfThreads.size(); i++) {
-            if (vecOfThreads[i].joinable()) {
-                vecOfThreads[i].join();
+
+        for (int i = 0; i < (int)sendStack.size(); i++) {
+            if (sendStack.top().joinable()) {
+                sendStack.top().join();
+                sendStack.pop();
             }
         }
 
@@ -260,28 +284,31 @@ void askForInput(std::exception_ptr& eptr) {
     catch (...) {
 
         abortReceive = true;
-        pthread_kill(receiveThread.native_handle(), SIGUSR1);
-
         abortSend = true;
 
-        sleep(1);
+        for (int i = 0; i < (int)receiveStack.size(); i++) {
 
-        if (receiveThread.joinable()) {
-            receiveThread.join();
-        }
-        for (int i = 0; i < (int)vecOfThreads.size(); i++) {
-            if (vecOfThreads[i].joinable()) {
-                vecOfThreads[i].join();
+            pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
+            sleep(1);
+            if (receiveStack.top().joinable()) {
+                receiveStack.top().join();
+                receiveStack.pop();
             }
         }
+
+        for (int i = 0; i < (int)sendStack.size(); i++) {
+            if (sendStack.top().joinable()) {
+                sendStack.top().join();
+                sendStack.pop();
+            }
+        }
+
         std::rethrow_exception(eptr);
     }
-
 }
 
 
 int protected_main() {
-
     std::exception_ptr eptr{};
     std::vector<std::thread> vecOfThreads;
 
@@ -297,7 +324,6 @@ int main() {
         protected_main();
     }
     catch (std::system_error& e) {
-
         std::cerr << e.what() << "\n";
     }
     return 0;

@@ -2,6 +2,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <signal.h>
 #include <sstream>
 #include "File.h"
 #include "Socket.h"
@@ -57,6 +58,8 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
             }
         }
 
+        abortSend = true;
+
     }
     catch (std::system_error& e) {
         std::cerr << e.what() << "\n";
@@ -79,10 +82,7 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         }
 
         // Create directory
-        int mkdir_result = mkdir(pathname.c_str(), S_IRWXU);
-        if (mkdir_result < 0) {
-            throw std::system_error(errno, std::system_category(), "mkdir failed");
-        }
+        mkdir(pathname.c_str(), S_IRWXU);
 
         if (abortRecieve) {
             return;
@@ -142,12 +142,23 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 }
 
 
+static void SignalHandler(int sig, siginfo_t* siginfo, void* context) {
+    std::cout << "signal handler called\n";
+    return;
+}
+
 void askForInput(std::exception_ptr& eptr) {
 
     std::atomic_bool exit, pause, abortSend, abortRecieve;
+    abortSend = true; abortRecieve = true;
     std::string userInput, pathname, filename;
-    std::exception_ptr eptr{};
-    std::thread sendThread, recieveThread;
+    std::thread recieveThread;
+    std::vector<std::thread> vecOfThreads;
+
+    struct sigaction act = {};
+    act.sa_flags = 0;
+    act.sa_sigaction = &SignalHandler;
+    sigaction(SIGUSR1, &act, NULL);
 
     try {
         while (!exit) {
@@ -162,8 +173,6 @@ void askForInput(std::exception_ptr& eptr) {
             }
             else if (userInput == "quit") {
                 exit = true;
-                abortRecieve = true;
-                abortSend = true;
             }
             else if (userInput == "resume") {
                 pause = false;
@@ -177,11 +186,12 @@ void askForInput(std::exception_ptr& eptr) {
 
                 if (userInput == "recieve") {
                     abortRecieve = true;
-                    recieveThread.join();
+                    pthread_kill(recieveThread.native_handle(), SIGUSR1);
+
                 }
                 else {
+                    pause = false;
                     abortSend = true;
-                    sendThread.join();
                 }
             }
             else if (userInput == "send") {
@@ -191,9 +201,13 @@ void askForInput(std::exception_ptr& eptr) {
                 }
                 else {
 
-
-                    sendThread = std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend));
-
+                    if (abortSend) {
+                        abortSend = false;
+                        vecOfThreads.push_back(std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend)));
+                    }
+                    else {
+                        std::cout << "\nWait for the current file to be sent.\n";
+                    }
                 }
             }
             else if (userInput == "recieve") {
@@ -205,7 +219,8 @@ void askForInput(std::exception_ptr& eptr) {
                 else {
 
                     //check if thread exists already
-                    if (recieveThread.get_id() == std::thread::id()) {
+                    if (abortRecieve) {
+                        abortRecieve = false;
                         recieveThread = std::thread(&NetcpRecieve, std::ref(eptr), std::ref(pathname), std::ref(abortRecieve));
                     }
                 }
@@ -218,29 +233,37 @@ void askForInput(std::exception_ptr& eptr) {
             }
         }
 
-        sleep(10);
+        abortRecieve = true;
+        pthread_kill(recieveThread.native_handle(), SIGUSR1);
 
-        if (sendThread.joinable()) {
-            sendThread.join();
-        }
+        sleep(1);
+
         if (recieveThread.joinable()) {
             recieveThread.join();
         }
-
+        for (int i = 0; i < (int)vecOfThreads.size(); i++) {
+            if (vecOfThreads[i].joinable()) {
+                vecOfThreads[i].join();
+            }
+        }
 
     }
     catch (...) {
 
         abortRecieve = true;
+        pthread_kill(recieveThread.native_handle(), SIGUSR1);
+
         abortSend = true;
 
-        sleep(10);
+        sleep(1);
 
-        if (sendThread.joinable()) {
-            sendThread.join();
-        }
         if (recieveThread.joinable()) {
             recieveThread.join();
+        }
+        for (int i = 0; i < (int)vecOfThreads.size(); i++) {
+            if (vecOfThreads[i].joinable()) {
+                vecOfThreads[i].join();
+            }
         }
         std::rethrow_exception(eptr);
     }
@@ -248,11 +271,21 @@ void askForInput(std::exception_ptr& eptr) {
 }
 
 
-int main() {
+int protected_main() {
 
     std::exception_ptr eptr{};
+    std::vector<std::thread> vecOfThreads;
+
+    std::thread inputThread(&askForInput, std::ref(eptr));
+    inputThread.join();
+    return 0;
+}
+
+
+int main() {
+
     try {
-        std::thread inputThread(&askForInput, std::ref(eptr));
+        protected_main();
     }
     catch (std::system_error& e) {
 

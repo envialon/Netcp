@@ -54,7 +54,7 @@ Message Socket::recieve_message() {
     Message outputMessage{};
     socklen_t address_len = sizeof(my_address_);
     int recieve_result = recvfrom(fd_, &outputMessage, sizeof(outputMessage), 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
-    if (recieve_result < 0) {
+    if (recieve_result < 0 && recieve_result != EINTR) {
         throw std::system_error(errno, std::system_category(), "recvfrom failed");
     }
     return outputMessage;

@@ -67,6 +67,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 
 }
 
+
 void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortRecieve) {
     try {
 
@@ -140,7 +141,8 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
 }
 
-void askForInput() {
+
+void askForInput(std::exception_ptr& eptr) {
 
     std::atomic_bool exit, pause, abortSend, abortRecieve;
     std::string userInput, pathname, filename;
@@ -201,6 +203,7 @@ void askForInput() {
                     std::cout << "\nincomplete instruction: recieve [PathnameToSaveFile]\n";
                 }
                 else {
+
                     //check if thread exists already
                     if (recieveThread.get_id() == std::thread::id()) {
                         recieveThread = std::thread(&NetcpRecieve, std::ref(eptr), std::ref(pathname), std::ref(abortRecieve));
@@ -215,6 +218,8 @@ void askForInput() {
             }
         }
 
+        sleep(10);
+
         if (sendThread.joinable()) {
             sendThread.join();
         }
@@ -224,24 +229,34 @@ void askForInput() {
 
 
     }
-    catch (std::system_error& e) {
+    catch (...) {
 
         abortRecieve = true;
         abortSend = true;
 
+        sleep(10);
+
         if (sendThread.joinable()) {
             sendThread.join();
         }
         if (recieveThread.joinable()) {
             recieveThread.join();
         }
-
-        std::cerr << e.what() << "\n";
+        std::rethrow_exception(eptr);
     }
 
 }
 
+
 int main() {
-    askForInput();
+
+    std::exception_ptr eptr{};
+    try {
+        std::thread inputThread(&askForInput, std::ref(eptr));
+    }
+    catch (std::system_error& e) {
+
+        std::cerr << e.what() << "\n";
+    }
     return 0;
 }

@@ -71,61 +71,61 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 }
 
 
-void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortRecieve) {
+void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive) {
     try {
 
-        sockaddr_in recieveSocketAdress(make_ip_address(6660, "127.0.0.1"));
-        Socket recieveSocket(recieveSocketAdress);
+        sockaddr_in receiveSocketAdress(make_ip_address(6660, "127.0.0.1"));
+        Socket receiveSocket(receiveSocketAdress);
 
-        if (abortRecieve) {
+        if (abortReceive) {
             return;
         }
 
         // Create directory
         mkdir(pathname.c_str(), S_IRWXU);
 
-        if (abortRecieve) {
+        if (abortReceive) {
             return;
         }
 
-        while (!abortRecieve) {
+        while (!abortReceive) {
 
-            if (abortRecieve) {
+            if (abortReceive) {
                 return;
             }
 
-            //recieve the message with the file info
-            Message messageToRecieve = recieveSocket.recieve_message();
+            //receive the message with the file info
+            Message messageToReceive = receiveSocket.receive_message();
 
-            //create and map the file using the recieved info
-            std::string fullPathname = (std::string(messageToRecieve.text.data()));
-            File output(&fullPathname.c_str()[0], messageToRecieve.file_size);
+            //create and map the file using the received info
+            std::string fullPathname = (std::string(messageToReceive.text.data()));
+            File output(&fullPathname.c_str()[0], messageToReceive.file_size);
 
-            if (abortRecieve) {
+            if (abortReceive) {
                 return;
             }
 
-            // .Calculate and set pointers and threshold necessary to recieve the contents of the file.
-            int numberOfLoops = messageToRecieve.file_size / MAX_PACKAGE_SIZE;
+            // .Calculate and set pointers and threshold necessary to receive the contents of the file.
+            int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
             char* aux_ptr = (char*)output.GetMapPointer();
             int aux_length = output.GetMapLength();
 
 
-            std::cout << "recieve nOfLoops:" << numberOfLoops << "\n";
+            std::cout << "receive nOfLoops:" << numberOfLoops << "\n";
 
-            if (abortRecieve) {
+            if (abortReceive) {
                 return;
             }
             //Location of error, check conditions of ifs do not change aux_length
             for (int i = 0; i <= numberOfLoops; ++i) {
-                if (abortRecieve) {
+                if (abortReceive) {
                     return;
                 }
                 else if (aux_length < MAX_PACKAGE_SIZE) {
-                    aux_length = recieveSocket.recieve_from(aux_ptr, aux_length);
+                    aux_length = receiveSocket.receive_from(aux_ptr, aux_length);
                 }
                 else if (aux_length > 0) {
-                    aux_length -= recieveSocket.recieve_from(aux_ptr, MAX_PACKAGE_SIZE);
+                    aux_length -= receiveSocket.receive_from(aux_ptr, MAX_PACKAGE_SIZE);
                     aux_ptr += MAX_PACKAGE_SIZE;
                 }
             }
@@ -133,7 +133,12 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         return;
     }
     catch (std::system_error& e) {
-        std::cerr << e.what() << "\n";
+        if (e.code().value() == EINTR) {
+            std::cout << "\nNetcpReceive aborted.";
+        }
+        else {
+            std::cerr << e.what() << "\n";
+        }
     }
     catch (...) {
         eptr = std::current_exception();
@@ -143,16 +148,16 @@ void NetcpRecieve(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
 
 static void SignalHandler(int sig, siginfo_t* siginfo, void* context) {
-    std::cout << "signal handler called\n";
+    std::cout << "\nSignal handler called\n";
     return;
 }
 
 void askForInput(std::exception_ptr& eptr) {
 
-    std::atomic_bool exit, pause, abortSend, abortRecieve;
-    abortSend = true; abortRecieve = true;
+    std::atomic_bool exit, pause, abortSend, abortReceive;
+    abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
-    std::thread recieveThread;
+    std::thread receiveThread;
     std::vector<std::thread> vecOfThreads;
 
     struct sigaction act = {};
@@ -161,8 +166,9 @@ void askForInput(std::exception_ptr& eptr) {
     sigaction(SIGUSR1, &act, NULL);
 
     try {
+
+        std::cout << "introduce a command:";
         while (!exit) {
-            std::cout << "introduce a command:";
             std::getline(std::cin, userInput);
 
             std::stringstream sstream(userInput);
@@ -184,9 +190,9 @@ void askForInput(std::exception_ptr& eptr) {
 
                 sstream >> userInput;
 
-                if (userInput == "recieve") {
-                    abortRecieve = true;
-                    pthread_kill(recieveThread.native_handle(), SIGUSR1);
+                if (userInput == "receive") {
+                    abortReceive = true;
+                    pthread_kill(receiveThread.native_handle(), SIGUSR1);
 
                 }
                 else {
@@ -210,36 +216,39 @@ void askForInput(std::exception_ptr& eptr) {
                     }
                 }
             }
-            else if (userInput == "recieve") {
+            else if (userInput == "receive") {
                 sstream >> pathname;
                 pathname = "./out/";
                 if (pathname.empty()) {
-                    std::cout << "\nincomplete instruction: recieve [PathnameToSaveFile]\n";
+                    std::cout << "\nincomplete instruction: receive [PathnameToSaveFile]\n";
                 }
                 else {
-
                     //check if thread exists already
-                    if (abortRecieve) {
-                        abortRecieve = false;
-                        recieveThread = std::thread(&NetcpRecieve, std::ref(eptr), std::ref(pathname), std::ref(abortRecieve));
+                    if (abortReceive) {
+                        abortReceive = false;
+                        receiveThread = std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive));
+                    }
+                    else {
+                        std::cout << "\nYou're already receiving \n";
                     }
                 }
             }
             else if (userInput == "help") {
-                std::cout << "\nplaceholder for help message.\n\n";
+                std::cout << "\nPlaceholder for help message.\n\n";
             }
             else {
                 std::cout << "\nUnknown instruction\nintroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
             }
+            std::cout << "introduce a command:";
         }
 
-        abortRecieve = true;
-        pthread_kill(recieveThread.native_handle(), SIGUSR1);
+        abortReceive = true;
+        pthread_kill(receiveThread.native_handle(), SIGUSR1);
 
         sleep(1);
 
-        if (recieveThread.joinable()) {
-            recieveThread.join();
+        if (receiveThread.joinable()) {
+            receiveThread.join();
         }
         for (int i = 0; i < (int)vecOfThreads.size(); i++) {
             if (vecOfThreads[i].joinable()) {
@@ -250,15 +259,15 @@ void askForInput(std::exception_ptr& eptr) {
     }
     catch (...) {
 
-        abortRecieve = true;
-        pthread_kill(recieveThread.native_handle(), SIGUSR1);
+        abortReceive = true;
+        pthread_kill(receiveThread.native_handle(), SIGUSR1);
 
         abortSend = true;
 
         sleep(1);
 
-        if (recieveThread.joinable()) {
-            recieveThread.join();
+        if (receiveThread.joinable()) {
+            receiveThread.join();
         }
         for (int i = 0; i < (int)vecOfThreads.size(); i++) {
             if (vecOfThreads[i].joinable()) {

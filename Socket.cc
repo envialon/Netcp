@@ -40,7 +40,7 @@ int Socket::send_to(const void* map_pointer, size_t map_length, const sockaddr_i
     return send_result;
 }
 
-int Socket::recieve_from(void* map_pointer, size_t map_length) {
+int Socket::receive_from(void* map_pointer, size_t map_length) {
     socklen_t address_len = sizeof(my_address_);
     int recieve_result = recvfrom(fd_, map_pointer, map_length, 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
     if (recieve_result < 0) {
@@ -50,11 +50,11 @@ int Socket::recieve_from(void* map_pointer, size_t map_length) {
 }
 
 
-Message Socket::recieve_message() {
+Message Socket::receive_message() {
     Message outputMessage{};
     socklen_t address_len = sizeof(my_address_);
     int recieve_result = recvfrom(fd_, &outputMessage, sizeof(outputMessage), 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
-    if (recieve_result < 0 && recieve_result != EINTR) {
+    if (recieve_result < 0) {
         throw std::system_error(errno, std::system_category(), "recvfrom failed");
     }
     return outputMessage;

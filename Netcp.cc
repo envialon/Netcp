@@ -23,25 +23,14 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         Message messageToSend{};
         messageToSend.text[1023] = '\0';
 
-        if (abortSend) {
-            return;
-        }
-
         //Send a message containing the info of the file 
-        messageToSend = input.GetMapInfo("output.txt");
+        messageToSend = input.GetMapInfo(filename);
         sendSocket.send_to(&messageToSend, sizeof(messageToSend), remoteSocket);
 
-        if (abortSend) {
-            return;
-        }
         // Send the contents of the file.
         char* aux_pointer = (char*)input.GetMapPointer();
         int numberOfLoops = input.GetMapLength() / MAX_PACKAGE_SIZE;
         int aux_length = input.GetMapLength();
-
-        if (abortSend) {
-            return;
-        }
 
         for (int i = 0; i <= numberOfLoops; ++i) {
 
@@ -62,9 +51,9 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
             }
         }
 
-        std::cout << "\tFile \"" << filename << "\" sent\n";
+        std::cout << "\n\tFile \"" << filename << "\" sent\n";
         abortSend = true;
-
+        return;
     }
     catch (std::system_error& e) {
         std::cerr << e.what() << "\n";
@@ -82,20 +71,11 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         sockaddr_in receiveSocketAdress(make_ip_address(6660, "127.0.0.1"));
         Socket receiveSocket(receiveSocketAdress);
 
-        if (abortReceive) {
-            return;
-        }
-
         // Create directory
         mkdir(pathname.c_str(), S_IRWXU);
 
         DIR* dirPointer = opendir(pathname.c_str());
         int dirFileDescriptor = dirfd(dirPointer);
-
-
-        if (abortReceive) {
-            return;
-        }
 
         while (!abortReceive) {
 
@@ -158,6 +138,18 @@ static void SignalHandler(int sig, siginfo_t* siginfo, void* context) {
     return;
 }
 
+
+void PopThread(std::stack<std::thread>& stack) {
+    if (!stack.empty() && stack.top().joinable()) {
+        stack.top().join();
+        stack.pop();
+    }
+    else {
+        return;
+    }
+}
+
+
 void askForInput(std::exception_ptr& eptr) {
 
     std::atomic_bool exit, pause, abortSend, abortReceive;
@@ -172,9 +164,9 @@ void askForInput(std::exception_ptr& eptr) {
     sigaction(SIGUSR1, &act, NULL);
 
     try {
-
-        std::cout << "Introduce a command:";
         while (!exit) {
+
+            std::cout << "Introduce a command:";
             std::getline(std::cin, userInput);
 
             std::stringstream sstream(userInput);
@@ -200,11 +192,7 @@ void askForInput(std::exception_ptr& eptr) {
                     if (!receiveStack.empty()) {
                         abortReceive = true;
                         pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
-
-                        if (receiveStack.top().joinable()) {
-                            receiveStack.top().join();
-                            receiveStack.pop();
-                        }
+                        PopThread(receiveStack);
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
@@ -214,10 +202,7 @@ void askForInput(std::exception_ptr& eptr) {
                     if (!sendStack.empty()) {
                         pause = false;
                         abortSend = true;
-                        if (sendStack.top().joinable()) {
-                            sendStack.top().join();
-                            sendStack.pop();
-                        }
+                        PopThread(sendStack);
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
@@ -233,6 +218,7 @@ void askForInput(std::exception_ptr& eptr) {
                 else {
 
                     if (abortSend) {
+                        PopThread(sendStack);
                         abortSend = false;
                         sendStack.push(std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend)));
                     }
@@ -249,7 +235,8 @@ void askForInput(std::exception_ptr& eptr) {
                 }
                 else {
                     //check if thread exists already
-                    if (receiveStack.empty()) {
+                    if (abortSend) {
+                        PopThread(sendStack);
                         abortReceive = false;
                         receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive)));
                     }
@@ -264,7 +251,6 @@ void askForInput(std::exception_ptr& eptr) {
             else {
                 std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
             }
-            std::cout << "Introduce a command:";
         }
 
         abortReceive = true;
@@ -274,17 +260,11 @@ void askForInput(std::exception_ptr& eptr) {
 
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
-            if (receiveStack.top().joinable()) {
-                receiveStack.top().join();
-                receiveStack.pop();
-            }
+            PopThread(receiveStack);
         }
 
         for (int i = 0; i < (int)sendStack.size(); i++) {
-            if (sendStack.top().joinable()) {
-                sendStack.top().join();
-                sendStack.pop();
-            }
+            PopThread(sendStack);
         }
 
     }
@@ -297,17 +277,11 @@ void askForInput(std::exception_ptr& eptr) {
 
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
-            if (receiveStack.top().joinable()) {
-                receiveStack.top().join();
-                receiveStack.pop();
-            }
+            PopThread(receiveStack);
         }
 
         for (int i = 0; i < (int)sendStack.size(); i++) {
-            if (sendStack.top().joinable()) {
-                sendStack.top().join();
-                sendStack.pop();
-            }
+            PopThread(sendStack);
         }
 
         std::rethrow_exception(eptr);

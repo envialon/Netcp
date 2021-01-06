@@ -9,7 +9,5 @@ File.o: File.cc
 	g++ -c File.cc
 
 clean:
-	rm Socket.o File.o 
-	rmdir out
-	rm output.txt
-	
+	rm Socket.o File.o Netcp
+	rm -r out

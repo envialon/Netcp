@@ -16,7 +16,7 @@ private:
 
 public:
     File(const char* pathname);
-    File(const char* pathname, int fileSize);
+    File(const char* pathname, int fileSize, int dirfd);
     ~File();
     void* GetMapPointer();
     int GetMapLength();

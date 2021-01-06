@@ -2,6 +2,8 @@
 #include <thread>
 #include <vector>
 #include <stack>
+#include <dirent.h>
+#include <sys/types.h>
 #include <atomic>
 #include <signal.h>
 #include <sstream>
@@ -60,6 +62,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
             }
         }
 
+        std::cout << "\tFile \"" << filename << "\" sent\n";
         abortSend = true;
 
     }
@@ -86,6 +89,10 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         // Create directory
         mkdir(pathname.c_str(), S_IRWXU);
 
+        DIR* dirPointer = opendir(pathname.c_str());
+        int dirFileDescriptor = dirfd(dirPointer);
+
+
         if (abortReceive) {
             return;
         }
@@ -100,8 +107,8 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             Message messageToReceive = receiveSocket.receive_message();
 
             //create and map the file using the received info
-            std::string fullPathname = (std::string(messageToReceive.text.data()));
-            File output(&fullPathname.c_str()[0], messageToReceive.file_size);
+            std::string filename = (std::string(messageToReceive.text.data()));
+            File output(&filename.c_str()[0], messageToReceive.file_size, dirFileDescriptor);
 
             if (abortReceive) {
                 return;
@@ -155,7 +162,7 @@ void askForInput(std::exception_ptr& eptr) {
 
     std::atomic_bool exit, pause, abortSend, abortReceive;
 
-    exit = false; abortSend = true; abortReceive = true;
+    pause = false; exit = false; abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
     std::stack<std::thread> sendStack, receiveStack;
 

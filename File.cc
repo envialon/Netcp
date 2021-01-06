@@ -19,9 +19,9 @@ File::File(const char* pathname) {
 
 }
 
-File::File(const char pathname[], int fileSize) {
+File::File(const char* pathname, int fileSize, int dirfd) {
 
-    fd_ = open(pathname, O_CREAT | O_RDWR | S_IRWXU, 0666);
+    fd_ = openat(dirfd, pathname, O_CREAT | O_RDWR | S_IRWXU, 0666);
     if (fd_ < 0) {
         throw std::system_error(errno, std::system_category(), "failed at opening file");
     }

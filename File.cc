@@ -59,9 +59,10 @@ int File::GetMapLength() {
 }
 Message File::GetMapInfo(std::string fileName) {
     Message mapInfo{};
-    for (int i = 0; i < fileName.length(); i++) {
-        mapInfo.text[i] = fileName[i];
-    }
+    strcpy(mapInfo.text.data(), fileName.c_str());
+    // for (int i = 0; i < fileName.length(); i++) {
+    //     mapInfo.text[i] = fileName[i];
+    // }
     mapInfo.file_size = map_length_;
     return mapInfo;
 }

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <signal.h>
 #include <sstream>
+#include <chrono>
 #include "File.h"
 #include "Socket.h"
 
@@ -14,7 +15,6 @@
 
 void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend) {
     try {
-
         Socket sendSocket(make_ip_address(0, "127.0.0.1"));
         sockaddr_in remoteSocket = make_ip_address(6660, "127.0.0.1");
 
@@ -33,7 +33,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         int aux_length = input.GetMapLength();
 
         for (int i = 0; i <= numberOfLoops; ++i) {
-
+            std::cout << "Send: " << i << "\n";
             if (abortSend) {
                 return;
             }
@@ -41,11 +41,13 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
                 i--;
             }
             else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(3));
                 if (aux_length < MAX_PACKAGE_SIZE) {
                     sendSocket.send_to(aux_pointer, aux_length, remoteSocket);
                 }
                 else if (aux_length > 0) {
-                    aux_length -= sendSocket.send_to(aux_pointer, MAX_PACKAGE_SIZE, remoteSocket);
+                    sendSocket.send_to(aux_pointer, MAX_PACKAGE_SIZE, remoteSocket);
+                    aux_length -= MAX_PACKAGE_SIZE;
                     aux_pointer += MAX_PACKAGE_SIZE;
                 }
             }
@@ -104,14 +106,16 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             }
             //Location of error, check conditions of ifs do not change aux_length
             for (int i = 0; i <= numberOfLoops; ++i) {
+                std::cout << "Receive: " << i << "\n";
                 if (abortReceive) {
                     return;
                 }
                 else if (aux_length < MAX_PACKAGE_SIZE) {
-                    aux_length = receiveSocket.receive_from(aux_ptr, aux_length);
+                    aux_length -= receiveSocket.receive_from(aux_ptr, aux_length);
                 }
                 else if (aux_length > 0) {
-                    aux_length -= receiveSocket.receive_from(aux_ptr, MAX_PACKAGE_SIZE);
+                    receiveSocket.receive_from(aux_ptr, MAX_PACKAGE_SIZE);
+                    aux_length -= MAX_PACKAGE_SIZE;
                     aux_ptr += MAX_PACKAGE_SIZE;
                 }
             }

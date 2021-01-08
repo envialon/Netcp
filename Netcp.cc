@@ -3,6 +3,7 @@
 #include <vector>
 #include <stack>
 #include <dirent.h>
+#include <mutex>
 #include <sys/types.h>
 #include <atomic>
 #include <signal.h>
@@ -12,6 +13,7 @@
 #include "Socket.h"
 
 #define MAX_PACKAGE_SIZE 60000
+std::mutex pauseMutex;
 
 void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend) {
     try {
@@ -38,7 +40,8 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
                 return;
             }
             else if (pause) {
-                i--;
+                pauseMutex.lock();
+                pauseMutex.unlock();
             }
             else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(3));
@@ -96,7 +99,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
                 return;
             }
 
-            // .Calculate and set pointers and threshold necessary to receive the contents of the file.
+            //Calculate and set pointers and threshold necessary to receive the contents of the file.
             int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
             char* aux_ptr = (char*)output.GetMapPointer();
             int aux_length = output.GetMapLength();
@@ -160,6 +163,8 @@ void askForInput(std::exception_ptr& eptr) {
 
     pause = false; exit = false; abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
+    //We use a stack to store the threads for simplicity, we only want to have
+    //one live thread at a time (in this case Stack.top())
     std::stack<std::thread> sendStack, receiveStack;
 
     struct sigaction act = {};
@@ -184,9 +189,11 @@ void askForInput(std::exception_ptr& eptr) {
             }
             else if (userInput == "resume") {
                 pause = false;
+                pauseMutex.unlock();
             }
             else if (userInput == "pause") {
                 pause = true;
+                pauseMutex.try_lock();
             }
             else if (userInput == "abort") {
 
@@ -233,7 +240,7 @@ void askForInput(std::exception_ptr& eptr) {
             }
             else if (userInput == "receive") {
                 sstream >> pathname;
-                pathname = "./out/";
+                pathname = "./out/"; /////////////////////////////////////////////////////// erase this
                 if (pathname.empty()) {
                     std::cout << "\n\tIncomplete instruction: receive [PathnameToSaveFile]\n";
                 }
@@ -260,6 +267,9 @@ void askForInput(std::exception_ptr& eptr) {
         abortReceive = true;
         abortSend = true;
 
+        // even if we only had 1 element max in the stacks, 
+        // we loop through all of their content to make sure 
+        //there aren't any live threads in them.
         for (int i = 0; i < (int)receiveStack.size(); i++) {
 
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
@@ -295,8 +305,6 @@ void askForInput(std::exception_ptr& eptr) {
 
 int protected_main() {
     std::exception_ptr eptr{};
-    std::vector<std::thread> vecOfThreads;
-
     std::thread inputThread(&askForInput, std::ref(eptr));
     inputThread.join();
     return 0;

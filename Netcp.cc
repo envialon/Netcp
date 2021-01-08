@@ -35,7 +35,6 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         int aux_length = input.GetMapLength();
 
         for (int i = 0; i <= numberOfLoops; ++i) {
-            std::cout << "Send: " << i << "\n";
             if (abortSend) {
                 return;
             }
@@ -109,7 +108,6 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             }
             //Location of error, check conditions of ifs do not change aux_length
             for (int i = 0; i <= numberOfLoops; ++i) {
-                std::cout << "Receive: " << i << "\n";
                 if (abortReceive) {
                     return;
                 }
@@ -157,9 +155,9 @@ void PopThread(std::stack<std::thread>& stack) {
 }
 
 
-void askForInput(std::exception_ptr& eptr) {
+void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
-    std::atomic_bool exit, pause, abortSend, abortReceive;
+    std::atomic_bool pause, abortSend, abortReceive;
 
     pause = false; exit = false; abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
@@ -259,7 +257,7 @@ void askForInput(std::exception_ptr& eptr) {
             else if (userInput == "help") {
                 std::cout << "\nPlaceholder for help message.\n\n";
             }
-            else {
+            else if (!exit) {
                 std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
             }
         }
@@ -283,7 +281,6 @@ void askForInput(std::exception_ptr& eptr) {
 
     }
     catch (...) {
-
         abortReceive = true;
         abortSend = true;
 
@@ -298,15 +295,43 @@ void askForInput(std::exception_ptr& eptr) {
             PopThread(sendStack);
         }
 
-        std::rethrow_exception(eptr);
+        eptr = std::current_exception();
     }
 }
 
+void auxThread(pthread_t& threadToKill, sigset_t& sigwaitset, std::atomic_bool& inputExit) {
+    int signum;
+    sigwait(&sigwaitset, &signum);
+    if (signum == SIGINT || signum == SIGTERM || signum == SIGHUP) {
+        inputExit = true;
+        pthread_kill(threadToKill, SIGUSR1);
+    }
+}
 
 int protected_main() {
     std::exception_ptr eptr{};
-    std::thread inputThread(&askForInput, std::ref(eptr));
+    std::atomic_bool exit;
+    sigset_t sigwaitset;
+
+    sigemptyset(&sigwaitset);
+    sigaddset(&sigwaitset, SIGINT);
+    sigaddset(&sigwaitset, SIGTERM);
+    sigaddset(&sigwaitset, SIGHUP);
+
+    pthread_sigmask(SIG_SETMASK, &sigwaitset, NULL);
+
+    std::thread inputThread(&askForInput, std::ref(eptr), std::ref(exit));
+    pthread_t inputThreadNativeHandle = inputThread.native_handle();
+
+    std::thread sigThread(&auxThread, std::ref(inputThreadNativeHandle), std::ref(sigwaitset), std::ref(exit));
+    sigThread.detach();
+
     inputThread.join();
+
+    if (eptr) {
+        std::rethrow_exception(eptr);
+    }
+
     return 0;
 }
 
@@ -317,6 +342,9 @@ int main() {
         protected_main();
     }
     catch (std::system_error& e) {
+        if (e.code().value() == SIGINT) {
+            std::cout << "\nwe got it\n";
+        }
         std::cerr << e.what() << "\n";
     }
     return 0;

@@ -44,7 +44,12 @@ int Socket::receive_from(void* map_pointer, size_t map_length) {
     socklen_t address_len = sizeof(my_address_);
     int recieve_result = recvfrom(fd_, map_pointer, map_length, 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
     if (recieve_result < 0) {
-        throw std::system_error(errno, std::system_category(), "recvfrom failed");
+        if (errno == EINTR) {
+            std::cout << "\tMessage not received, recvfrom interrupted.\n";
+        }
+        else {
+            throw std::system_error(errno, std::system_category(), "recvfrom failed");
+        }
     }
     return recieve_result;
 }
@@ -55,7 +60,12 @@ Message Socket::receive_message() {
     socklen_t address_len = sizeof(my_address_);
     int recieve_result = recvfrom(fd_, &outputMessage, sizeof(outputMessage), 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
     if (recieve_result < 0) {
-        throw std::system_error(errno, std::system_category(), "recvfrom failed");
+        if (errno == EINTR) {
+            std::cout << "\tMessage not received, recvfrom was interrupted.\n";
+        }
+        else {
+            throw std::system_error(errno, std::system_category(), "recvfrom failed");
+        }
     }
     return outputMessage;
 }

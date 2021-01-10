@@ -45,7 +45,7 @@ File::File(const char* pathname, int fileSize, int dirfd) {
 
 File::~File() {
     munmap(map_pointer_, map_length_);
-
+    map_pointer_ = NULL;
     lockf(fd_, F_ULOCK, 0);
     int close_result = close(fd_);
 }

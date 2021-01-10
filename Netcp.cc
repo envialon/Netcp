@@ -83,32 +83,26 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
         while (!abortReceive) {
 
-            if (abortReceive) {
-                return;
-            }
-
             //receive the message with the file info
             Message messageToReceive = receiveSocket.receive_message();
+
+            if (abortReceive) {
+                std::cout << "\tNetcpReceive aborted.\n";
+                return;
+            }
 
             //create and map the file using the received info
             std::string filename = (std::string(messageToReceive.text.data()));
             File output(&filename.c_str()[0], messageToReceive.file_size, dirFileDescriptor);
-
-            if (abortReceive) {
-                return;
-            }
 
             //Calculate and set pointers and threshold necessary to receive the contents of the file.
             int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
             char* aux_ptr = (char*)output.GetMapPointer();
             int aux_length = output.GetMapLength();
 
-            if (abortReceive) {
-                return;
-            }
-            //Location of error, check conditions of ifs do not change aux_length
             for (int i = 0; i <= numberOfLoops; ++i) {
                 if (abortReceive) {
+                    std::cout << "\tNetcpReceive aborted.\n";
                     return;
                 }
                 else if (aux_length < MAX_PACKAGE_SIZE) {
@@ -121,13 +115,11 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
                 }
             }
         }
+        std::cout << "\tNetcpReceive aborted.\n";
         return;
     }
     catch (std::system_error& e) {
         if (e.code().value() == EINTR) {
-            std::cout << "\tNetcpReceive aborted.\n";
-        }
-        else {
             std::cerr << e.what() << "\n";
         }
     }
@@ -139,7 +131,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
 
 static void SignalHandler(int sig, siginfo_t* siginfo, void* context) {
-    std::cout << "\n\tSignal handler called\n";
+    std::cout << "\tSignal handler called\n";
     return;
 }
 
@@ -194,7 +186,6 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                 pauseMutex.try_lock();
             }
             else if (userInput == "abort") {
-
                 sstream >> userInput;
 
                 if (userInput == "receive") {
@@ -225,7 +216,6 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                     std::cout << "\n\tIncomplete instruction: send [FilenameToSend]\n";
                 }
                 else {
-
                     if (abortSend) {
                         PopThread(sendStack);
                         abortSend = false;
@@ -244,8 +234,8 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                 }
                 else {
                     //check if thread exists already
-                    if (abortSend) {
-                        PopThread(sendStack);
+                    if (abortReceive) {
+                        PopThread(receiveStack);
                         abortReceive = false;
                         receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive)));
                     }

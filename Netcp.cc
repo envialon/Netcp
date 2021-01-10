@@ -36,6 +36,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 
         for (int i = 0; i <= numberOfLoops; ++i) {
             if (abortSend) {
+                std::cout << "\tNetcpSend aborted.\n";
                 return;
             }
             else if (pause) {
@@ -69,7 +70,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 }
 
 
-void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive) {
+void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive, std::atomic_bool& corruptedFile) {
     try {
 
         sockaddr_in receiveSocketAdress(make_ip_address(6660, "127.0.0.1"));
@@ -102,7 +103,8 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
             for (int i = 0; i <= numberOfLoops; ++i) {
                 if (abortReceive) {
-                    std::cout << "\tNetcpReceive aborted.\n";
+                    corruptedFile = true;
+                    std::cout << "\tNetcpReceive aborted\n";
                     return;
                 }
                 else if (aux_length < MAX_PACKAGE_SIZE) {
@@ -119,9 +121,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         return;
     }
     catch (std::system_error& e) {
-        if (e.code().value() == EINTR) {
-            std::cerr << e.what() << "\n";
-        }
+        std::cerr << e.what() << "\n";
     }
     catch (...) {
         eptr = std::current_exception();
@@ -149,10 +149,11 @@ void PopThread(std::stack<std::thread>& stack) {
 
 void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
-    std::atomic_bool pause, abortSend, abortReceive;
+    std::atomic_bool pause, abortSend, abortReceive, corruptedFile;
 
     pause = false; exit = false; abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
+
     //We use a stack to store the threads for simplicity, we only want to have
     //one live thread at a time (in this case Stack.top())
     std::stack<std::thread> sendStack, receiveStack;
@@ -174,17 +175,21 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             if (eptr) {
                 std::rethrow_exception(eptr);
             }
+
             else if (userInput == "quit") {
                 exit = true;
             }
+
             else if (userInput == "resume") {
                 pause = false;
                 pauseMutex.unlock();
             }
+
             else if (userInput == "pause") {
                 pause = true;
                 pauseMutex.try_lock();
             }
+
             else if (userInput == "abort") {
                 sstream >> userInput;
 
@@ -193,29 +198,46 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                         abortReceive = true;
                         pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
                         PopThread(receiveStack);
+
+                        //remove the file if is incomplete.
+                        std::string fullPathname(pathname.append(filename));
+
+                        //we don't want to erase the original file so we check that fullPathname is different from it.
+                        if (corruptedFile && fullPathname != filename) {
+                            int removeResult = remove(fullPathname.c_str());
+                            std::cout << "\tFile: " << fullPathname << " was incomplete so it was removed\n";
+                            if (removeResult < 0) {
+                                throw std::system_error(errno, std::system_category(), "remove failed");
+                            }
+                        }
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
                     }
                 }
-                else {
+                else if (userInput == "send") {
                     if (!sendStack.empty()) {
-                        pause = false;
                         abortSend = true;
+                        pause = false;
+                        pauseMutex.unlock();
                         PopThread(sendStack);
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
                     }
                 }
-
+                else {
+                    std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
+                }
             }
+
             else if (userInput == "send") {
                 sstream >> filename;
                 if (filename.empty()) {
                     std::cout << "\n\tIncomplete instruction: send [FilenameToSend]\n";
                 }
-                else {
+                //if we can read the file, proceed to send it.
+                else if (access(filename.c_str(), F_OK) == 0) {
                     if (abortSend) {
                         PopThread(sendStack);
                         abortSend = false;
@@ -225,7 +247,11 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                         std::cout << "\nWait for the current file to be sent.\n";
                     }
                 }
+                else {
+                    std::cout << "\t" << filename << " doesn't exist.\n";
+                }
             }
+
             else if (userInput == "receive") {
                 sstream >> pathname;
                 pathname = "./out/"; /////////////////////////////////////////////////////// erase this
@@ -237,16 +263,18 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                     if (abortReceive) {
                         PopThread(receiveStack);
                         abortReceive = false;
-                        receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive)));
+                        receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive), std::ref(corruptedFile)));
                     }
                     else {
-                        std::cout << "\nYou're already receiving dummy dumb\n";
+                        std::cout << "\nYou're already receiving\n";
                     }
                 }
             }
+
             else if (userInput == "help") {
                 std::cout << "\nPlaceholder for help message.\n\n";
             }
+
             else if (!exit) {
                 std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
             }
@@ -254,12 +282,13 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
         abortReceive = true;
         abortSend = true;
+        pause = false;
+        pauseMutex.unlock();
 
         // even if we only had 1 element max in the stacks, 
         // we loop through all of their content to make sure 
         //there aren't any live threads in them.
         for (int i = 0; i < (int)receiveStack.size(); i++) {
-
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
             PopThread(receiveStack);
@@ -273,18 +302,17 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
     catch (...) {
         abortReceive = true;
         abortSend = true;
+        pause = false;
+        pauseMutex.unlock();
 
         for (int i = 0; i < (int)receiveStack.size(); i++) {
-
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
             PopThread(receiveStack);
         }
-
         for (int i = 0; i < (int)sendStack.size(); i++) {
             PopThread(sendStack);
         }
-
         eptr = std::current_exception();
     }
 }
@@ -297,6 +325,7 @@ void auxThread(pthread_t& threadToKill, sigset_t& sigwaitset, std::atomic_bool& 
         pthread_kill(threadToKill, SIGUSR1);
     }
 }
+
 
 int protected_main() {
     std::exception_ptr eptr{};
@@ -332,9 +361,6 @@ int main() {
         protected_main();
     }
     catch (std::system_error& e) {
-        if (e.code().value() == SIGINT) {
-            std::cout << "\nwe got it\n";
-        }
         std::cerr << e.what() << "\n";
     }
     return 0;

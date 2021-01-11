@@ -10,4 +10,3 @@ File.o: File.cc
 
 clean:
 	rm Socket.o File.o Netcp
-	rm -r out

@@ -125,6 +125,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
                     aux_ptr += MAX_PACKAGE_SIZE;
                 }
             }
+            std::cout << "\tFile \"" << filename << "\" saved at " << pathname << "\n";
         }
         std::cout << "\tNetcpReceive aborted.\n";
         return;
@@ -177,6 +178,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
     try {
         while (!exit) {
 
+            // This cout is not synchronized wiht the messages of the other threads.
             std::cout << "Introduce a command:";
             std::getline(std::cin, userInput);
 

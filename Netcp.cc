@@ -34,6 +34,10 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         int numberOfLoops = input.GetMapLength() / MAX_PACKAGE_SIZE;
         int aux_length = input.GetMapLength();
 
+        // Number for loop will do at least 1 loop, 
+        // ( i <= numberOfLoops ) this way, we will
+        // also send the last package,
+        // with size < MAX_PACKAGE_SIZE
         for (int i = 0; i <= numberOfLoops; ++i) {
 
             if (pause) {
@@ -97,11 +101,16 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             std::string filename = (std::string(messageToReceive.text.data()));
             File output(&filename.c_str()[0], messageToReceive.file_size, dirFileDescriptor);
 
-            //Calculate and set pointers and threshold necessary to receive the contents of the file.
+            //Calculate and set pointer, length and threshold necessary to receive the contents of the file.
             int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
             char* aux_ptr = (char*)output.GetMapPointer();
             int aux_length = output.GetMapLength();
 
+
+            // Number for loop will do at least 1 loop, 
+            // ( i <= numberOfLoops ) this way, we will
+            // also receive the last  package, 
+            // with size < MAX_PACKAGE_SIZE
             for (int i = 0; i <= numberOfLoops; ++i) {
                 if (abortReceive) {
                     std::cout << "\tNetcpReceive aborted\n";
@@ -137,6 +146,8 @@ static void SignalHandler(int sig, siginfo_t* siginfo, void* context) {
 
 
 void PopThread(std::stack<std::thread>& stack) {
+    // we use this function to erase the top thread
+    // of a stack after waiting for it to finish
     if (!stack.empty() && stack.top().joinable()) {
         stack.top().join();
         stack.pop();
@@ -303,6 +314,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
         eptr = std::current_exception();
     }
 }
+
 
 void auxThread(pthread_t& threadToKill, sigset_t& sigwaitset, std::atomic_bool& inputExit) {
     int signum;

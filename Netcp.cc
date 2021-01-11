@@ -35,13 +35,14 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         int aux_length = input.GetMapLength();
 
         for (int i = 0; i <= numberOfLoops; ++i) {
-            if (abortSend) {
-                std::cout << "\tNetcpSend aborted.\n";
-                return;
-            }
-            else if (pause) {
+
+            if (pause) {
                 pauseMutex.lock();
                 pauseMutex.unlock();
+            }
+            else if (abortSend) {
+                std::cout << "\tNetcpSend aborted.\n";
+                return;
             }
             else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(3));
@@ -70,7 +71,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 }
 
 
-void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive, std::atomic_bool& corruptedFile) {
+void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive) {
     try {
 
         sockaddr_in receiveSocketAdress(make_ip_address(6660, "127.0.0.1"));
@@ -103,7 +104,6 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
             for (int i = 0; i <= numberOfLoops; ++i) {
                 if (abortReceive) {
-                    corruptedFile = true;
                     std::cout << "\tNetcpReceive aborted\n";
                     return;
                 }
@@ -149,7 +149,7 @@ void PopThread(std::stack<std::thread>& stack) {
 
 void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
-    std::atomic_bool pause, abortSend, abortReceive, corruptedFile;
+    std::atomic_bool pause, abortSend, abortReceive;
 
     pause = false; exit = false; abortSend = true; abortReceive = true;
     std::string userInput, pathname, filename;
@@ -198,18 +198,6 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                         abortReceive = true;
                         pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
                         PopThread(receiveStack);
-
-                        //remove the file if is incomplete.
-                        std::string fullPathname(pathname.append(filename));
-
-                        //we don't want to erase the original file so we check that fullPathname is different from it.
-                        if (corruptedFile && fullPathname != filename) {
-                            int removeResult = remove(fullPathname.c_str());
-                            std::cout << "\tFile: " << fullPathname << " was incomplete so it was removed\n";
-                            if (removeResult < 0) {
-                                throw std::system_error(errno, std::system_category(), "remove failed");
-                            }
-                        }
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
@@ -254,7 +242,6 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
             else if (userInput == "receive") {
                 sstream >> pathname;
-                pathname = "./out/"; /////////////////////////////////////////////////////// erase this
                 if (pathname.empty()) {
                     std::cout << "\n\tIncomplete instruction: receive [PathnameToSaveFile]\n";
                 }
@@ -263,7 +250,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                     if (abortReceive) {
                         PopThread(receiveStack);
                         abortReceive = false;
-                        receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive), std::ref(corruptedFile)));
+                        receiveStack.push(std::thread(&NetcpReceive, std::ref(eptr), std::ref(pathname), std::ref(abortReceive)));
                     }
                     else {
                         std::cout << "\nYou're already receiving\n";

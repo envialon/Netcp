@@ -11,14 +11,23 @@
 #include <chrono>
 #include "File.h"
 #include "Socket.h"
+#include <unordered_map>
 
 #define MAX_PACKAGE_SIZE 60000
-std::mutex pauseMutex;
 
-void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend) {
+
+void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend, std::mutex& pauseMutex) {
     try {
+
+        const char* envDestIp = std::getenv("NETCP_DEST_IP");
+        const char* envDestPort = std::getenv("NETCP_DEST_PORT");
+
+        if (envDestIp == NULL || envDestPort == NULL) {
+            const char* envDestIP = "127.0.0.1";
+            const char* envDestPort = "6660";
+        }
         Socket sendSocket(make_ip_address(0, "127.0.0.1"));
-        sockaddr_in remoteSocket = make_ip_address(6660, "127.0.0.1");
+        sockaddr_in remoteSocket = make_ip_address(atoi(envDestPort), envDestIp);
 
         File input(filename.c_str());
 
@@ -78,7 +87,14 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive) {
     try {
 
-        sockaddr_in receiveSocketAdress(make_ip_address(6660, "127.0.0.1"));
+
+        const char* envPort = std::getenv("NETCP_PORT");
+
+        if (envPort == NULL) {
+            envPort = "6660";
+        }
+
+        sockaddr_in receiveSocketAdress(make_ip_address(atoi(envPort), "127.0.0.1"));
         Socket receiveSocket(receiveSocketAdress);
 
         // Create directory
@@ -158,17 +174,23 @@ void PopThread(std::stack<std::thread>& stack) {
     }
 }
 
+struct sendStruct {
+    std::atomic_bool abortSend;
+    std::atomic_bool pauseSend;
+    std::mutex pauseMutex;
+    std::thread sendThread;
+};
 
 void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
-    std::atomic_bool pause, abortSend, abortReceive;
+    std::atomic_bool abortReceive;
 
-    pause = false; exit = false; abortSend = true; abortReceive = true;
+    abortReceive = true;
     std::string userInput, pathname, filename;
 
-    //We use a stack to store the threads for simplicity, we only want to have
-    //one live thread at a time (in this case Stack.top())
-    std::stack<std::thread> sendStack, receiveStack;
+    int sendTaskCount;
+    std::unordered_map<int, sendStruct> sendTasks;
+    std::stack<std::thread>  receiveStack;
 
     struct sigaction act = {};
     act.sa_flags = 0;
@@ -194,13 +216,21 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             }
 
             else if (userInput == "resume") {
-                pause = false;
-                pauseMutex.unlock();
+                sstream >> userInput;
+                int index = atoi(userInput.c_str());
+                if (sendTasks.find(index) != sendTasks.end()) {
+                    sendTasks[index].pauseSend = false;
+                    sendTasks[index].pauseMutex.unlock();
+                }
             }
 
             else if (userInput == "pause") {
-                pause = true;
-                pauseMutex.try_lock();
+                sstream >> userInput;
+                int index = atoi(userInput.c_str());
+                if (sendTasks.find(index) != sendTasks.end()) {
+                    sendTasks[index].pauseSend = true;
+                    sendTasks[index].pauseMutex.try_lock();
+                }
             }
 
             else if (userInput == "abort") {
@@ -216,19 +246,16 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
                     }
                 }
-                else if (userInput == "send") {
-                    if (!sendStack.empty()) {
-                        abortSend = true;
-                        pause = false;
-                        pauseMutex.unlock();
-                        PopThread(sendStack);
+                else {
+                    int index = atoi(userInput.c_str());
+                    if (sendTasks.find(index) != sendTasks.end()) {
+                        sendTasks[index].abortSend = true;
+                        sendTasks[index].pauseSend = false;
+                        sendTasks[index].pauseMutex.unlock();
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
                     }
-                }
-                else {
-                    std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
                 }
             }
 
@@ -237,16 +264,19 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                 if (filename.empty()) {
                     std::cout << "\n\tIncomplete instruction: send [FilenameToSend]\n";
                 }
+
                 //if we can read the file, proceed to send it.
                 else if (access(filename.c_str(), F_OK) == 0) {
-                    if (abortSend) {
-                        PopThread(sendStack);
-                        abortSend = false;
-                        sendStack.push(std::thread(&NetcpSend, std::ref(eptr), std::ref(filename), std::ref(pause), std::ref(abortSend)));
-                    }
-                    else {
-                        std::cout << "\nWait for the current file to be sent.\n";
-                    }
+                    // sendTasks.emplace(std::piecewise_construct, std::forward_as_tuple(sendTaskCount), std::forward_as_tuple(aux));
+                    sendTasks.emplace(sendTaskCount, sendStruct{});
+                    //     sendTasks[sendTaskCount].abortSend = false;
+                //     sendTasks[sendTaskCount].pauseSend = false;
+                //     sendTasks[sendTaskCount].sendThread = std::thread(&NetcpSend, std::ref(eptr),
+                //         std::ref(filename),
+                //         std::ref(sendTasks[sendTaskCount].pauseSend),
+                //         std::ref(sendTasks[sendTaskCount].abortSend),
+                //         std::ref(sendTasks[sendTaskCount].pauseMutex));
+                    sendTaskCount++;
                 }
                 else {
                     std::cout << "\t" << filename << " doesn't exist.\n";
@@ -280,38 +310,24 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             }
         }
 
-        abortReceive = true;
-        abortSend = true;
-        pause = false;
-        pauseMutex.unlock();
 
-        // even if we only had 1 element max in the stacks, 
-        // we loop through all of their content to make sure 
-        //there aren't any live threads in them.
+        abortReceive = true;
+
         for (int i = 0; i < (int)receiveStack.size(); i++) {
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
             PopThread(receiveStack);
-        }
-
-        for (int i = 0; i < (int)sendStack.size(); i++) {
-            PopThread(sendStack);
         }
 
     }
+
     catch (...) {
         abortReceive = true;
-        abortSend = true;
-        pause = false;
-        pauseMutex.unlock();
 
         for (int i = 0; i < (int)receiveStack.size(); i++) {
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
             PopThread(receiveStack);
-        }
-        for (int i = 0; i < (int)sendStack.size(); i++) {
-            PopThread(sendStack);
         }
         eptr = std::current_exception();
     }

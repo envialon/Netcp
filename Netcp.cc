@@ -174,7 +174,9 @@ void PopThread(std::stack<std::thread>& stack) {
     }
 }
 
-struct sendStruct {
+struct sendTask {
+    sendTask(std::thread& thread) : sendThread{ std::move(thread) } {}
+    sendTask() : sendThread{ std::move(std::thread()) } {}
     std::atomic_bool abortSend;
     std::atomic_bool pauseSend;
     std::mutex pauseMutex;
@@ -188,8 +190,8 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
     abortReceive = true;
     std::string userInput, pathname, filename;
 
-    int sendTaskCount;
-    std::unordered_map<int, sendStruct> sendTasks;
+    int sendTaskCount = 0;
+    std::unordered_map<int, sendTask> mapOfTasks;
     std::stack<std::thread>  receiveStack;
 
     struct sigaction act = {};
@@ -218,18 +220,18 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             else if (userInput == "resume") {
                 sstream >> userInput;
                 int index = atoi(userInput.c_str());
-                if (sendTasks.find(index) != sendTasks.end()) {
-                    sendTasks[index].pauseSend = false;
-                    sendTasks[index].pauseMutex.unlock();
+                if (mapOfTasks.find(index) != mapOfTasks.end()) {
+                    mapOfTasks[index].pauseSend = false;
+                    mapOfTasks[index].pauseMutex.unlock();
                 }
             }
 
             else if (userInput == "pause") {
                 sstream >> userInput;
                 int index = atoi(userInput.c_str());
-                if (sendTasks.find(index) != sendTasks.end()) {
-                    sendTasks[index].pauseSend = true;
-                    sendTasks[index].pauseMutex.try_lock();
+                if (mapOfTasks.find(index) != mapOfTasks.end()) {
+                    mapOfTasks[index].pauseSend = true;
+                    mapOfTasks[index].pauseMutex.try_lock();
                 }
             }
 
@@ -248,10 +250,10 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                 }
                 else {
                     int index = atoi(userInput.c_str());
-                    if (sendTasks.find(index) != sendTasks.end()) {
-                        sendTasks[index].abortSend = true;
-                        sendTasks[index].pauseSend = false;
-                        sendTasks[index].pauseMutex.unlock();
+                    if (mapOfTasks.find(index) != mapOfTasks.end()) {
+                        mapOfTasks[index].abortSend = true;
+                        mapOfTasks[index].pauseSend = false;
+                        mapOfTasks[index].pauseMutex.unlock();
                     }
                     else {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
@@ -267,15 +269,14 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
                 //if we can read the file, proceed to send it.
                 else if (access(filename.c_str(), F_OK) == 0) {
-                    // sendTasks.emplace(std::piecewise_construct, std::forward_as_tuple(sendTaskCount), std::forward_as_tuple(aux));
-                    sendTasks.emplace(sendTaskCount, sendStruct{});
-                    //     sendTasks[sendTaskCount].abortSend = false;
-                //     sendTasks[sendTaskCount].pauseSend = false;
-                //     sendTasks[sendTaskCount].sendThread = std::thread(&NetcpSend, std::ref(eptr),
-                //         std::ref(filename),
-                //         std::ref(sendTasks[sendTaskCount].pauseSend),
-                //         std::ref(sendTasks[sendTaskCount].abortSend),
-                //         std::ref(sendTasks[sendTaskCount].pauseMutex));
+
+                    std::thread aux;
+                    mapOfTasks.emplace(sendTaskCount, aux);
+                    mapOfTasks[sendTaskCount].sendThread = std::thread(&NetcpSend, std::ref(eptr),
+                        std::ref(filename), std::ref(mapOfTasks[sendTaskCount].pauseSend),
+                        std::ref(mapOfTasks[sendTaskCount].abortSend), std::ref(mapOfTasks[sendTaskCount].pauseMutex));
+
+                    std::cout << "\nNew send created with id: " << sendTaskCount << "\n";
                     sendTaskCount++;
                 }
                 else {
@@ -345,6 +346,7 @@ void auxThread(pthread_t& threadToKill, sigset_t& sigwaitset, std::atomic_bool& 
 
 
 int protected_main() {
+
     std::exception_ptr eptr{};
     std::atomic_bool exit;
     sigset_t sigwaitset;

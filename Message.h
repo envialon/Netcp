@@ -3,8 +3,8 @@
 
 #define MESSAGE_H
 struct Message {
-    std::array<char, 256> text;
     int file_size;
+    std::array<char, 256> text;
 };
 
 #endif 

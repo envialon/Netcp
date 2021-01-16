@@ -12,11 +12,13 @@ private:
 
     sockaddr_in remote_address_;
     int fd_;
-    sockaddr_in my_address_;
+    sockaddr_in recv_address_;
 
 public:
     Socket(const sockaddr_in& address);
     ~Socket();
+
+    sockaddr_in GetRecvAdress();
 
     int send_to(const void* map_pointer, size_t map_length, const sockaddr_in& address);
     int receive_from(void* map_pointer, size_t map_length);

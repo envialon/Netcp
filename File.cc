@@ -50,6 +50,9 @@ File::~File() {
     int close_result = close(fd_);
 }
 
+int File::GetFd() {
+    return fd_;
+}
 
 void* File::GetMapPointer() {
     return map_pointer_;

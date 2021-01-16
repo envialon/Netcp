@@ -10,7 +10,7 @@ sockaddr_in make_ip_address(int port, const std::string& ip_address) {
 }
 
 Socket::Socket(const sockaddr_in& address) {
-    my_address_ = address;
+    recv_address_ = address;
     fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd_ < 0) {
         throw std::system_error(errno, std::system_category(), "failed to create the socket");
@@ -27,6 +27,10 @@ Socket::~Socket() {
     close(fd_);
 }
 
+sockaddr_in Socket::GetRecvAdress() {
+    return recv_address_;
+}
+
 int Socket::send_to(const void* map_pointer, size_t map_length, const sockaddr_in& address) {
     remote_address_ = address;
     int send_result = sendto(fd_, map_pointer, map_length, 0,
@@ -41,8 +45,8 @@ int Socket::send_to(const void* map_pointer, size_t map_length, const sockaddr_i
 }
 
 int Socket::receive_from(void* map_pointer, size_t map_length) {
-    socklen_t address_len = sizeof(my_address_);
-    int recieve_result = recvfrom(fd_, map_pointer, map_length, 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
+    socklen_t address_len = sizeof(recv_address_);
+    int recieve_result = recvfrom(fd_, map_pointer, map_length, 0, reinterpret_cast<sockaddr*>(&recv_address_), &address_len);
     if (recieve_result < 0) {
         if (errno == EINTR) {
             std::cout << "\tMessage not received, recvfrom interrupted.\n";
@@ -57,8 +61,8 @@ int Socket::receive_from(void* map_pointer, size_t map_length) {
 
 Message Socket::receive_message() {
     Message outputMessage{};
-    socklen_t address_len = sizeof(my_address_);
-    int recieve_result = recvfrom(fd_, &outputMessage, sizeof(outputMessage), 0, reinterpret_cast<sockaddr*>(&my_address_), &address_len);
+    socklen_t address_len = sizeof(recv_address_);
+    int recieve_result = recvfrom(fd_, &outputMessage, sizeof(outputMessage), 0, reinterpret_cast<sockaddr*>(&recv_address_), &address_len);
     if (recieve_result < 0) {
         if (errno == EINTR) {
             std::cout << "\tMessage not received, recvfrom was interrupted.\n";

@@ -18,6 +18,8 @@ public:
     File(const char* pathname);
     File(const char* pathname, int fileSize, int dirfd);
     ~File();
+
+    int GetFd();
     void* GetMapPointer();
     int GetMapLength();
     Message GetMapInfo(std::string fileName);

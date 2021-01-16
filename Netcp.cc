@@ -15,16 +15,41 @@
 
 #define MAX_PACKAGE_SIZE 60000
 
+struct sendTask {
+    sendTask(std::thread& thread) : sendThread{ std::move(thread) } {}
+    sendTask() : sendThread{ std::move(std::thread()) } {}
+    std::atomic_bool abortSend;
+    std::atomic_bool pauseSend;
+    std::mutex pauseMutex;
+    std::thread sendThread;
+};
 
-void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend, std::mutex& pauseMutex) {
+struct pairHash {
+    template<class T1, class T2>
+    std::size_t operator () (const std::pair<T1, T2>& pair) const {
+        return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
+    }
+};
+
+struct receptionTask {
+    int fd;
+    int mapSize;
+    int auxSize;
+    void* mapPointer;
+    char* auxPointer;
+
+};
+
+void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend, std::mutex& pauseMutex, std::unordered_map<int, sendTask>& mapOfTasks, int& index) {
     try {
 
         const char* envDestIp = std::getenv("NETCP_DEST_IP");
         const char* envDestPort = std::getenv("NETCP_DEST_PORT");
 
-        if (envDestIp == NULL || envDestPort == NULL) {
-            const char* envDestIP = "127.0.0.1";
-            const char* envDestPort = "6660";
+
+        if (envDestIp == NULL && envDestPort == NULL) {
+            envDestIp = "127.0.0.1";
+            envDestPort = "6660";
         }
         Socket sendSocket(make_ip_address(0, "127.0.0.1"));
         sockaddr_in remoteSocket = make_ip_address(atoi(envDestPort), envDestIp);
@@ -71,11 +96,12 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
         }
 
         std::cout << "\n\tFile \"" << filename << "\" sent\n";
-        abortSend = true;
+        mapOfTasks.erase(index);
         return;
     }
     catch (std::system_error& e) {
         std::cerr << e.what() << "\n";
+        mapOfTasks.erase(index);
     }
     catch (...) {
         eptr = std::current_exception();
@@ -85,8 +111,10 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
 
 
 void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_bool& abortReceive) {
-    try {
+    sockaddr_in auxSockaddr;
 
+    try {
+        std::unordered_map <std::pair<uint32_t, in_port_t>, receptionTask, pairHash> receptionMap;
 
         const char* envPort = std::getenv("NETCP_PORT");
 
@@ -97,51 +125,95 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
         sockaddr_in receiveSocketAdress(make_ip_address(atoi(envPort), "127.0.0.1"));
         Socket receiveSocket(receiveSocketAdress);
 
+
+        auxSockaddr = receiveSocket.GetRecvAdress();
+
         // Create directory
         mkdir(pathname.c_str(), S_IRWXU);
 
         DIR* dirPointer = opendir(pathname.c_str());
         int dirFileDescriptor = dirfd(dirPointer);
+        char buffer[MAX_PACKAGE_SIZE];
 
         while (!abortReceive) {
 
-            //receive the message with the file info
-            Message messageToReceive = receiveSocket.receive_message();
 
-            if (abortReceive) {
-                std::cout << "\tNetcpReceive aborted.\n";
-                return;
+            receiveSocket.receive_from(&buffer, MAX_PACKAGE_SIZE);
+            auxSockaddr = receiveSocket.GetRecvAdress();
+            std::pair pairKey(auxSockaddr.sin_addr.s_addr, (in_port_t)auxSockaddr.sin_port);
+
+
+            if (receptionMap.find(pairKey) == receptionMap.end()) {
+                //nueva entrada en receptionMap
+                receptionTask auxReceptionTask;
+                Message fileInfo;
+                memcpy(&fileInfo, &buffer, sizeof(fileInfo));
+
+                // //create and map the file using the received info
+                std::string filename = (std::string(fileInfo.text.data()));
+                File output(&filename.c_str()[0], fileInfo.file_size, dirFileDescriptor);
+
+                auxReceptionTask.fd = output.GetFd();
+                auxReceptionTask.mapPointer = output.GetMapPointer();
+                auxReceptionTask.mapSize = output.GetMapLength();
+                auxReceptionTask.auxPointer = (char*)auxReceptionTask.mapPointer;
+                auxReceptionTask.auxSize = auxReceptionTask.mapSize;
+
+                receptionMap.emplace(pairKey, auxReceptionTask);
             }
+            else {
+                if (receptionMap[pairKey].mapSize < MAX_PACKAGE_SIZE) {
 
-            //create and map the file using the received info
-            std::string filename = (std::string(messageToReceive.text.data()));
-            File output(&filename.c_str()[0], messageToReceive.file_size, dirFileDescriptor);
-
-            //Calculate and set pointer, length and threshold necessary to receive the contents of the file.
-            int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
-            char* aux_ptr = (char*)output.GetMapPointer();
-            int aux_length = output.GetMapLength();
-
-
-            // Number for loop will do at least 1 loop, 
-            // ( i <= numberOfLoops ) this way, we will
-            // also receive the last  package, 
-            // with size < MAX_PACKAGE_SIZE
-            for (int i = 0; i <= numberOfLoops; ++i) {
-                if (abortReceive) {
-                    std::cout << "\tNetcpReceive aborted\n";
-                    return;
+                    memcpy(receptionMap[pairKey].auxPointer, &buffer, receptionMap[pairKey].auxSize);
                 }
-                else if (aux_length < MAX_PACKAGE_SIZE) {
-                    aux_length -= receiveSocket.receive_from(aux_ptr, aux_length);
-                }
-                else if (aux_length > 0) {
-                    receiveSocket.receive_from(aux_ptr, MAX_PACKAGE_SIZE);
-                    aux_length -= MAX_PACKAGE_SIZE;
-                    aux_ptr += MAX_PACKAGE_SIZE;
+                else if (receptionMap[pairKey].mapSize > 0) {
+                    memcpy(receptionMap[pairKey].auxPointer, &buffer, MAX_PACKAGE_SIZE);
+                    receptionMap[pairKey].mapSize -= MAX_PACKAGE_SIZE;
+                    receptionMap[pairKey].auxPointer += MAX_PACKAGE_SIZE;
                 }
             }
-            std::cout << "\tFile \"" << filename << "\" saved at " << pathname << "\n";
+            // //receive the message with the file info
+            // Message messageToReceive = receiveSocket.receive_message();
+
+            // aux = receiveSocket.GetRecvAdress();
+            // char* remote_IP = inet_ntoa(aux.sin_addr);
+            // int remote_port = ntohs((aux).sin_port);
+            // std::cout << remote_IP << " : " << remote_port << "\n";
+
+            // if (abortReceive) {
+            //     std::cout << "\tNetcpReceive aborted.\n";
+            //     return;
+            // }
+
+            // //create and map the file using the received info
+            // std::string filename = (std::string(messageToReceive.text.data()));
+            // File output(&filename.c_str()[0], messageToReceive.file_size, dirFileDescriptor);
+
+            // //Calculate and set pointer, length and threshold necessary to receive the contents of the file.
+            // int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
+            // char* aux_ptr = (char*)output.GetMapPointer();
+            // int aux_length = output.GetMapLength();
+
+
+            // // Number for loop will do at least 1 loop, 
+            // // ( i <= numberOfLoops ) this way, we will
+            // // also receive the last  package, 
+            // // with size < MAX_PACKAGE_SIZE
+            // for (int i = 0; i <= numberOfLoops; ++i) {
+            //     if (abortReceive) {
+            //         std::cout << "\tNetcpReceive aborted\n";
+            //         return;
+            //     }
+            //     else if (aux_length < MAX_PACKAGE_SIZE) {
+            //         aux_length -= receiveSocket.receive_from(aux_ptr, aux_length);
+            //     }
+            //     else if (aux_length > 0) {
+            //         receiveSocket.receive_from(aux_ptr, MAX_PACKAGE_SIZE);
+            //         aux_length -= MAX_PACKAGE_SIZE;
+            //         aux_ptr += MAX_PACKAGE_SIZE;
+            //     }
+            // }
+            // std::cout << "\tFile \"" << filename << "\" saved at " << pathname << "\n";
         }
         std::cout << "\tNetcpReceive aborted.\n";
         return;
@@ -173,15 +245,6 @@ void PopThread(std::stack<std::thread>& stack) {
         return;
     }
 }
-
-struct sendTask {
-    sendTask(std::thread& thread) : sendThread{ std::move(thread) } {}
-    sendTask() : sendThread{ std::move(std::thread()) } {}
-    std::atomic_bool abortSend;
-    std::atomic_bool pauseSend;
-    std::mutex pauseMutex;
-    std::thread sendThread;
-};
 
 void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
@@ -238,6 +301,8 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             else if (userInput == "abort") {
                 sstream >> userInput;
 
+                int index = atoi(userInput.c_str());
+
                 if (userInput == "receive") {
                     if (!receiveStack.empty()) {
                         abortReceive = true;
@@ -248,19 +313,17 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                         std::cout << "\n\tYou can't abort something that doesn't exist...\n";
                     }
                 }
+                else if (mapOfTasks.find(index) != mapOfTasks.end()) {
+
+                    mapOfTasks[index].abortSend = true;
+                    mapOfTasks[index].pauseSend = false;
+                    mapOfTasks[index].pauseMutex.unlock();
+                }
+
                 else {
-                    int index = atoi(userInput.c_str());
-                    if (mapOfTasks.find(index) != mapOfTasks.end()) {
-                        mapOfTasks[index].abortSend = true;
-                        mapOfTasks[index].pauseSend = false;
-                        mapOfTasks[index].pauseMutex.unlock();
-                    }
-                    else {
-                        std::cout << "\n\tYou can't abort something that doesn't exist...\n";
-                    }
+                    std::cout << "\n\tYou can't abort something that doesn't exist...\n";
                 }
             }
-
             else if (userInput == "send") {
                 sstream >> filename;
                 if (filename.empty()) {
@@ -272,9 +335,12 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
                     std::thread aux;
                     mapOfTasks.emplace(sendTaskCount, aux);
+                    mapOfTasks[sendTaskCount].pauseSend = true;
+                    mapOfTasks[sendTaskCount].pauseMutex.try_lock();
                     mapOfTasks[sendTaskCount].sendThread = std::thread(&NetcpSend, std::ref(eptr),
                         std::ref(filename), std::ref(mapOfTasks[sendTaskCount].pauseSend),
-                        std::ref(mapOfTasks[sendTaskCount].abortSend), std::ref(mapOfTasks[sendTaskCount].pauseMutex));
+                        std::ref(mapOfTasks[sendTaskCount].abortSend), std::ref(mapOfTasks[sendTaskCount].pauseMutex),
+                        std::ref(mapOfTasks), std::ref(sendTaskCount));
 
                     std::cout << "\nNew send created with id: " << sendTaskCount << "\n";
                     sendTaskCount++;
@@ -310,9 +376,18 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                 std::cout << "\n\tUnknown instruction\n\tIntroduce a valid instruction, type \"help\" to display the valid instructions\n\n";
             }
         }
-
-
         abortReceive = true;
+
+        for (int i = 0; i <= sendTaskCount; i++) {
+            if (mapOfTasks.find(i) != mapOfTasks.end()) {
+                mapOfTasks[i].abortSend = true;
+                mapOfTasks[i].pauseSend = false;
+                mapOfTasks[i].pauseMutex.unlock();
+                if (mapOfTasks[i].sendThread.joinable()) {
+                    mapOfTasks[i].sendThread.join();
+                }
+            }
+        }
 
         for (int i = 0; i < (int)receiveStack.size(); i++) {
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
@@ -325,6 +400,17 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
     catch (...) {
         abortReceive = true;
 
+        for (int i = 0; i <= sendTaskCount; i++) {
+            if (mapOfTasks.find(i) != mapOfTasks.end()) {
+                mapOfTasks[i].abortSend = true;
+                mapOfTasks[i].pauseSend = false;
+                mapOfTasks[i].pauseMutex.unlock();
+                if (mapOfTasks[i].sendThread.joinable()) {
+                    mapOfTasks[i].sendThread.join();
+                }
+            }
+        }
+
         for (int i = 0; i < (int)receiveStack.size(); i++) {
             pthread_kill(receiveStack.top().native_handle(), SIGUSR1);
             sleep(1);
@@ -333,7 +419,6 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
         eptr = std::current_exception();
     }
 }
-
 
 void auxThread(pthread_t& threadToKill, sigset_t& sigwaitset, std::atomic_bool& inputExit) {
     int signum;
@@ -369,7 +454,6 @@ int protected_main() {
     if (eptr) {
         std::rethrow_exception(eptr);
     }
-
     return 0;
 }
 

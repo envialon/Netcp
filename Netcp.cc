@@ -21,6 +21,7 @@ struct sendTask {
     std::atomic_bool abortSend;
     std::atomic_bool pauseSend;
     std::mutex pauseMutex;
+    std::string filename;
     std::thread sendThread;
 };
 
@@ -32,13 +33,14 @@ struct pairHash {
 };
 
 struct receptionTask {
-    receptionTask(std::string filename, int fileSize, int dirfd) : file{ File(filename, fileSize, dirfd) } {}
+    receptionTask(std::string filenameIn, int fileSize, int dirfd) : file{ File(filenameIn, fileSize, dirfd) } {}
     receptionTask() : file{ File() } {}
     int fd;
     int mapSize;
     int auxSize;
     void* mapPointer;
     char* auxPointer;
+    std::string filename;
     File file;
 };
 
@@ -80,7 +82,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
                 pauseMutex.lock();
                 pauseMutex.unlock();
             }
-            else if (abortSend) {
+            if (abortSend) {
                 std::cout << "\tNetcpSend aborted.\n";
                 return;
             }
@@ -141,8 +143,6 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
             receiveSocket.receive_from(&buffer, MAX_PACKAGE_SIZE);
 
-            std::cout << "recevied in buffer\n";//////////////////////////////////////////////////////////////////////////////
-
             auxSockaddr = receiveSocket.GetRecvAdress();
             std::pair pairKey(auxSockaddr.sin_addr.s_addr, (in_port_t)auxSockaddr.sin_port);
 
@@ -156,6 +156,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
                 std::string filename = (std::string(fileInfo.text.data()));
 
                 receptionMap.emplace(std::piecewise_construct, std::forward_as_tuple(pairKey), std::forward_as_tuple(filename, fileInfo.file_size, dirFileDescriptor));
+                receptionMap[pairKey].filename = fileInfo.text.data();
                 receptionMap[pairKey].fd = receptionMap[pairKey].file.GetFd();
                 receptionMap[pairKey].mapPointer = receptionMap[pairKey].file.GetMapPointer();
                 receptionMap[pairKey].mapSize = receptionMap[pairKey].file.GetMapLength();
@@ -166,6 +167,7 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
             else {
                 if (receptionMap[pairKey].auxSize < MAX_PACKAGE_SIZE) {
                     memcpy(receptionMap[pairKey].auxPointer, &buffer, receptionMap[pairKey].auxSize);
+                    std::cout << "\tFile: \"" << receptionMap[pairKey].filename << "\" saved at: \"" << pathname << "\n";
                 }
                 else if (receptionMap[pairKey].auxSize > 0) {
                     memcpy(receptionMap[pairKey].auxPointer, &buffer, MAX_PACKAGE_SIZE);
@@ -239,16 +241,17 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             }
 
             else if (userInput == "resume") {
-                for (int i = 0; i < 5; i++) {
-                    sstream >> userInput;
-                    if (userInput.empty()) { break; }
-                    int index = atoi(userInput.c_str());
-                    if (mapOfTasks.find(index) != mapOfTasks.end()) {
-
-                        mapOfTasks[index].pauseSend = false;
-                        mapOfTasks[index].pauseMutex.unlock();
-                    }
+                sstream >> userInput;
+                if (userInput.empty()) { break; }
+                int index = atoi(userInput.c_str());
+                if (mapOfTasks.find(index) != mapOfTasks.end()) {
+                    mapOfTasks[index].pauseSend = false;
+                    mapOfTasks[index].pauseMutex.unlock();
                 }
+                else {
+                    std::cout << "\tThere's no send thread with id: " << index << "\n";
+                }
+
             }
 
             else if (userInput == "pause") {
@@ -287,16 +290,16 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
                 }
             }
             else if (userInput == "send") {
+
                 sstream >> filename;
                 if (filename.empty()) {
-                    std::cout << "\n\tIncomplete instruction: send [FilenameToSend]\n";
+                    break;
                 }
-
                 //if we can read the file, proceed to send it.
                 else if (access(filename.c_str(), F_OK) == 0) {
-
                     std::thread aux;
                     mapOfTasks.emplace(sendTaskCount, aux);
+                    mapOfTasks[sendTaskCount].filename = filename;
                     mapOfTasks[sendTaskCount].abortSend = false;
                     mapOfTasks[sendTaskCount].pauseSend = true;
                     mapOfTasks[sendTaskCount].pauseMutex.try_lock();

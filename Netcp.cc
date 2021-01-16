@@ -32,11 +32,14 @@ struct pairHash {
 };
 
 struct receptionTask {
+    receptionTask(std::string filename, int fileSize, int dirfd) : file{ File(filename, fileSize, dirfd) } {}
+    receptionTask() : file{ File() } {}
     int fd;
     int mapSize;
     int auxSize;
     void* mapPointer;
     char* auxPointer;
+    File file;
 };
 
 void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend, std::mutex& pauseMutex, std::unordered_map<int, sendTask>& mapOfTasks, int& index) {
@@ -82,7 +85,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
                 return;
             }
             else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (aux_length < MAX_PACKAGE_SIZE) {
                     sendSocket.send_to(aux_pointer, aux_length, remoteSocket);
                 }
@@ -94,7 +97,7 @@ void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool
             }
         }
 
-        std::cout << "\n\tFile \"" << filename << "\" sent\n";
+        std::cout << "\n\tFile \"" << "\" sent\n";
         mapOfTasks.erase(index);
         return;
     }
@@ -138,26 +141,27 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
             receiveSocket.receive_from(&buffer, MAX_PACKAGE_SIZE);
 
+            std::cout << "recevied in buffer\n";//////////////////////////////////////////////////////////////////////////////
+
             auxSockaddr = receiveSocket.GetRecvAdress();
             std::pair pairKey(auxSockaddr.sin_addr.s_addr, (in_port_t)auxSockaddr.sin_port);
 
             if (receptionMap.find(pairKey) == receptionMap.end()) {
                 //nueva entrada en receptionMap
-                receptionTask auxReceptionTask;
+
                 Message fileInfo;
                 memcpy(&fileInfo, &buffer, sizeof(fileInfo));
 
                 // //create and map the file using the received info
                 std::string filename = (std::string(fileInfo.text.data()));
-                File output(&filename.c_str()[0], fileInfo.file_size, dirFileDescriptor);
 
-                auxReceptionTask.fd = output.GetFd();
-                auxReceptionTask.mapPointer = output.GetMapPointer();
-                auxReceptionTask.mapSize = output.GetMapLength();
-                auxReceptionTask.auxPointer = (char*)auxReceptionTask.mapPointer;
-                auxReceptionTask.auxSize = auxReceptionTask.mapSize;
+                receptionMap.emplace(std::piecewise_construct, std::forward_as_tuple(pairKey), std::forward_as_tuple(filename, fileInfo.file_size, dirFileDescriptor));
+                receptionMap[pairKey].fd = receptionMap[pairKey].file.GetFd();
+                receptionMap[pairKey].mapPointer = receptionMap[pairKey].file.GetMapPointer();
+                receptionMap[pairKey].mapSize = receptionMap[pairKey].file.GetMapLength();
+                receptionMap[pairKey].auxPointer = (char*)receptionMap[pairKey].mapPointer;
+                receptionMap[pairKey].auxSize = receptionMap[pairKey].mapSize;
 
-                receptionMap.emplace(pairKey, auxReceptionTask);
             }
             else {
                 if (receptionMap[pairKey].auxSize < MAX_PACKAGE_SIZE) {
@@ -179,7 +183,6 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
     catch (...) {
         eptr = std::current_exception();
     }
-
 }
 
 
@@ -236,11 +239,15 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
             }
 
             else if (userInput == "resume") {
-                sstream >> userInput;
-                int index = atoi(userInput.c_str());
-                if (mapOfTasks.find(index) != mapOfTasks.end()) {
-                    mapOfTasks[index].pauseSend = false;
-                    mapOfTasks[index].pauseMutex.unlock();
+                for (int i = 0; i < 5; i++) {
+                    sstream >> userInput;
+                    if (userInput.empty()) { break; }
+                    int index = atoi(userInput.c_str());
+                    if (mapOfTasks.find(index) != mapOfTasks.end()) {
+
+                        mapOfTasks[index].pauseSend = false;
+                        mapOfTasks[index].pauseMutex.unlock();
+                    }
                 }
             }
 
@@ -290,6 +297,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
 
                     std::thread aux;
                     mapOfTasks.emplace(sendTaskCount, aux);
+                    mapOfTasks[sendTaskCount].abortSend = false;
                     mapOfTasks[sendTaskCount].pauseSend = true;
                     mapOfTasks[sendTaskCount].pauseMutex.try_lock();
                     mapOfTasks[sendTaskCount].sendThread = std::thread(&NetcpSend, std::ref(eptr),
@@ -333,7 +341,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
         }
         abortReceive = true;
 
-        for (int i = 0; i <= sendTaskCount; i++) {
+        for (int i = 0; i < sendTaskCount; i++) {
             if (mapOfTasks.find(i) != mapOfTasks.end()) {
                 mapOfTasks[i].abortSend = true;
                 mapOfTasks[i].pauseSend = false;
@@ -355,7 +363,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
     catch (...) {
         abortReceive = true;
 
-        for (int i = 0; i <= sendTaskCount; i++) {
+        for (int i = 0; i < sendTaskCount; i++) {
             if (mapOfTasks.find(i) != mapOfTasks.end()) {
                 mapOfTasks[i].abortSend = true;
                 mapOfTasks[i].pauseSend = false;

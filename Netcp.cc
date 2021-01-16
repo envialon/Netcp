@@ -37,7 +37,6 @@ struct receptionTask {
     int auxSize;
     void* mapPointer;
     char* auxPointer;
-
 };
 
 void NetcpSend(std::exception_ptr& eptr, std::string& filename, std::atomic_bool& pause, std::atomic_bool& abortSend, std::mutex& pauseMutex, std::unordered_map<int, sendTask>& mapOfTasks, int& index) {
@@ -137,11 +136,10 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
 
         while (!abortReceive) {
 
-
             receiveSocket.receive_from(&buffer, MAX_PACKAGE_SIZE);
+
             auxSockaddr = receiveSocket.GetRecvAdress();
             std::pair pairKey(auxSockaddr.sin_addr.s_addr, (in_port_t)auxSockaddr.sin_port);
-
 
             if (receptionMap.find(pairKey) == receptionMap.end()) {
                 //nueva entrada en receptionMap
@@ -162,64 +160,21 @@ void NetcpReceive(std::exception_ptr& eptr, std::string& pathname, std::atomic_b
                 receptionMap.emplace(pairKey, auxReceptionTask);
             }
             else {
-                if (receptionMap[pairKey].mapSize < MAX_PACKAGE_SIZE) {
-
+                if (receptionMap[pairKey].auxSize < MAX_PACKAGE_SIZE) {
                     memcpy(receptionMap[pairKey].auxPointer, &buffer, receptionMap[pairKey].auxSize);
                 }
-                else if (receptionMap[pairKey].mapSize > 0) {
+                else if (receptionMap[pairKey].auxSize > 0) {
                     memcpy(receptionMap[pairKey].auxPointer, &buffer, MAX_PACKAGE_SIZE);
-                    receptionMap[pairKey].mapSize -= MAX_PACKAGE_SIZE;
+                    receptionMap[pairKey].auxSize -= MAX_PACKAGE_SIZE;
                     receptionMap[pairKey].auxPointer += MAX_PACKAGE_SIZE;
                 }
             }
-            // //receive the message with the file info
-            // Message messageToReceive = receiveSocket.receive_message();
-
-            // aux = receiveSocket.GetRecvAdress();
-            // char* remote_IP = inet_ntoa(aux.sin_addr);
-            // int remote_port = ntohs((aux).sin_port);
-            // std::cout << remote_IP << " : " << remote_port << "\n";
-
-            // if (abortReceive) {
-            //     std::cout << "\tNetcpReceive aborted.\n";
-            //     return;
-            // }
-
-            // //create and map the file using the received info
-            // std::string filename = (std::string(messageToReceive.text.data()));
-            // File output(&filename.c_str()[0], messageToReceive.file_size, dirFileDescriptor);
-
-            // //Calculate and set pointer, length and threshold necessary to receive the contents of the file.
-            // int numberOfLoops = messageToReceive.file_size / MAX_PACKAGE_SIZE;
-            // char* aux_ptr = (char*)output.GetMapPointer();
-            // int aux_length = output.GetMapLength();
-
-
-            // // Number for loop will do at least 1 loop, 
-            // // ( i <= numberOfLoops ) this way, we will
-            // // also receive the last  package, 
-            // // with size < MAX_PACKAGE_SIZE
-            // for (int i = 0; i <= numberOfLoops; ++i) {
-            //     if (abortReceive) {
-            //         std::cout << "\tNetcpReceive aborted\n";
-            //         return;
-            //     }
-            //     else if (aux_length < MAX_PACKAGE_SIZE) {
-            //         aux_length -= receiveSocket.receive_from(aux_ptr, aux_length);
-            //     }
-            //     else if (aux_length > 0) {
-            //         receiveSocket.receive_from(aux_ptr, MAX_PACKAGE_SIZE);
-            //         aux_length -= MAX_PACKAGE_SIZE;
-            //         aux_ptr += MAX_PACKAGE_SIZE;
-            //     }
-            // }
-            // std::cout << "\tFile \"" << filename << "\" saved at " << pathname << "\n";
         }
         std::cout << "\tNetcpReceive aborted.\n";
         return;
     }
     catch (std::system_error& e) {
-        std::cerr << e.what() << "\n";
+        std::cerr << "\tReceive: " << e.what() << "\n";
     }
     catch (...) {
         eptr = std::current_exception();

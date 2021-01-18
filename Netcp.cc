@@ -361,6 +361,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
         mapOfTasks[i].pauseMutex.unlock();
         if (mapOfTasks[i].sendThread.joinable()) {
           mapOfTasks[i].sendThread.join();
+          mapOfTasks.erase(i);
         }
       }
     }
@@ -383,6 +384,7 @@ void askForInput(std::exception_ptr& eptr, std::atomic_bool& exit) {
         mapOfTasks[i].pauseMutex.unlock();
         if (mapOfTasks[i].sendThread.joinable()) {
           mapOfTasks[i].sendThread.join();
+          mapOfTasks.erase(i);
         }
       }
     }

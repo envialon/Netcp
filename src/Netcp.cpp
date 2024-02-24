@@ -12,8 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "File.h"
-#include "Socket.h"
+#include "../include/File.h"
+#include "../include/Socket.h"
 
 #define MAX_PACKAGE_SIZE 60000
 

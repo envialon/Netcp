@@ -1,12 +1,12 @@
 
-NetCp:Netcp.cc Socket.o File.o
+NetCp: ./src/Netcp.cc Socket.o File.o
 	g++ -std=c++17 -g -Wall -o Netcp Netcp.cc File.o Socket.o -pthread
 
-Socket.o: Socket.cc
-	g++ -c Socket.cc
+Socket.o: ./src/Socket.cc
+	g++ -c ./src/Socket.cc
 
-File.o: File.cc
-	g++ -c File.cc
+File.o: ./src/File.cc
+	g++ -c ./src/File.cc
 
 clean:
-	rm Socket.o File.o Netcp
+	rm Socket.o File.o ./src/Netcp

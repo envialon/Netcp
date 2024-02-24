@@ -51,5 +51,6 @@
         "streambuf": "cpp",
         "typeinfo": "cpp"
     },
-    "C_Cpp.intelliSenseEngineFallback": "Disabled"
+    "C_Cpp.intelliSenseEngineFallback": "Disabled",
+    "makefile.makefilePath": "Makefile"
 }

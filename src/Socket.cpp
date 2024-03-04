@@ -31,7 +31,7 @@ sockaddr_in Socket::GetRecvAdress() {
     return recv_address_;
 }
 
-int Socket::send_to(const void* map_pointer, size_t map_length, const sockaddr_in& address) {
+int Socket::SendTo(const void* map_pointer, size_t map_length, const sockaddr_in& address) {
     remote_address_ = address;
     int send_result = sendto(fd_, map_pointer, map_length, 0,
         reinterpret_cast<const sockaddr*>(&address),
@@ -44,7 +44,7 @@ int Socket::send_to(const void* map_pointer, size_t map_length, const sockaddr_i
     return send_result;
 }
 
-int Socket::receive_from(void* map_pointer, size_t map_length) {
+int Socket::ReceiveFrom(void* map_pointer, size_t map_length) {
     socklen_t address_len = sizeof(recv_address_);
     int recieve_result = recvfrom(fd_, map_pointer, map_length, 0, reinterpret_cast<sockaddr*>(&recv_address_), &address_len);
     if (recieve_result < 0) {
@@ -59,7 +59,7 @@ int Socket::receive_from(void* map_pointer, size_t map_length) {
 }
 
 
-Message Socket::receive_message() {
+Message Socket::RecieveMessage() {
     Message outputMessage{};
     socklen_t address_len = sizeof(recv_address_);
     int recieve_result = recvfrom(fd_, &outputMessage, sizeof(outputMessage), 0, reinterpret_cast<sockaddr*>(&recv_address_), &address_len);
@@ -74,7 +74,7 @@ Message Socket::receive_message() {
     return outputMessage;
 }
 
-void Socket::printMessage(Message& message) {
+void Socket::PrintMessage(Message& message) {
     char* remote_IP = inet_ntoa(remote_address_.sin_addr);
     int remote_port = ntohs(remote_address_.sin_port);
     std::cout << "El sistema " << remote_IP << ":" << remote_port <<

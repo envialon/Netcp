@@ -20,10 +20,10 @@ public:
 
     sockaddr_in GetRecvAdress();
 
-    int send_to(const void* map_pointer, size_t map_length, const sockaddr_in& address);
-    int receive_from(void* map_pointer, size_t map_length);
-    Message receive_message();
-    void printMessage(Message& message);
+    int SendTo(const void* map_pointer, size_t map_length, const sockaddr_in& address);
+    int ReceiveFrom(void* map_pointer, size_t map_length);
+    Message RecieveMessage();
+    void PrintMessage(Message& message);
 
 };
 
